@@ -8,8 +8,8 @@ const cache = new NodeCache({ stdTTL: 3600 });
 
 const PORT = process.env.PORT || 7000;
 const TOKEN = process.env.DIZPAL_TOKEN || '9iQNC5HQwPlaFuJDkhncJ5XTJ8feGXOJatAA';
-//const API_BASE = 'ydfvfdizipanel.ru';
-const API_BASE = 'dizipal1542.com';
+const API_BASE = 'ydfvfdizipanel.ru';
+//const API_BASE = 'dizipal1542.com';
 const MANIFEST = {
   id: 'com.dizipalorijinal.addon',
   version: '5.0.0',
