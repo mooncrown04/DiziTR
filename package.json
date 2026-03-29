@@ -1,13 +1,23 @@
 {
-  "name": "dizipalorijinal-addon",
-  "version": "1.0.0",
-  "description": "DiziPal Orijinal - Türkçe Dublaj Dizi Eklentisi",
+  "name": "sinewix-addon",
+  "version": "1.1.0",
+  "description": "Sinewix Stremio eklentisi",
   "main": "index.js",
   "scripts": {
     "start": "node index.js"
   },
+  "keywords": [
+    "stremio",
+    "addon",
+    "streaming",
+    "turkish",
+    "series"
+  ],
+  "author": "",
+  "license": "MIT",
   "dependencies": {
-    "express": "^4.18.2",
-    "node-cache": "^5.1.2"
-  }
+    "node-fetch": "^3.3.2",
+    "stremio-addon-sdk": "^1.6.10"
+  },
+  "type": "module"
 }
