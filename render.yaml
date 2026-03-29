@@ -1,6 +1,6 @@
 services:
   - type: web
-    name: dizipalorijinal
+    name: SineWix
     env: node
     plan: free
     buildCommand: npm install
@@ -8,5 +8,4 @@ services:
     envVars:
       - key: PORT
         value: 10000
-      - key: DIZPAL_TOKEN
-        value: 9iQNC5HQwPlaFuJDkhncJ5XTJ8feGXOJatAA
+     
