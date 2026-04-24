@@ -15,24 +15,38 @@ const HEADERS = {
     'Accept': 'application/json'
 };
 
+// --- SINEWIX FORMATINDA MANIFEST ---
 const MANIFEST = {
-    id: 'org.rectv.pro.v5',
-    version: '5.0.0',
-    name: 'RECTV Pro v5',
-    description: 'RecTV Canlı TV, Film ve Dizi Kaynakları',
-    resources: ['catalog', 'meta', 'stream'],
-    types: ['movie', 'series', 'tv'],
+    id: "org.rectv.pro.v5",
+    version: "5.0.0",
+    name: "RECTV Pro v5",
+    description: "RecTV Canlı TV, Film ve Dizi Kaynakları",
     catalogs: [
-        { id: 'rec-canli-tv', type: 'tv', name: '📺 RECTV Canlı TV', extra: [{ name: 'skip' }] },
-        { id: 'rec-son-filmler', type: 'movie', name: '🎬 RECTV Son Filmler', extra: [{ name: 'skip' }] },
-        { id: 'rec-son-diziler', type: 'series', name: '🍿 RECTV Son Diziler', extra: [{ name: 'skip' }] },
-        { id: 'rec-aksiyon', type: 'movie', name: '💥 Aksiyon Filmleri', extra: [{ name: 'skip' }] },
-        { id: 'rec-korku', type: 'movie', name: '👻 Korku Filmleri', extra: [{ name: 'skip' }] }
+        { id: "rec-canli-tv", type: "tv", name: "📺 RECTV Canlı TV", extra: [{ name: "skip" }] },
+        { id: "rec-son-filmler", type: "movie", name: "🎬 RECTV Son Filmler", extra: [{ name: "skip" }] },
+        { id: "rec-son-diziler", type: "series", name: "🍿 RECTV Son Diziler", extra: [{ name: "skip" }] },
+        { id: "rec-aksiyon", type: "movie", name: "💥 Aksiyon Filmleri", extra: [{ name: "skip" }] },
+        { id: "rec-korku", type: "movie", name: "👻 Korku Filmleri", extra: [{ name: "skip" }] }
     ],
-    idPrefixes: ['rec_', 'tt'],
+    resources: [
+        { name: "catalog", types: ["movie", "series", "tv"], idPrefixes: ["rec_"] },
+        { name: "meta", types: ["movie", "series", "tv"], idPrefixes: ["rec_"] },
+        { name: "stream", types: ["movie", "series", "tv"], idPrefixes: ["rec_", "tt"] }
+    ],
+    types: ["movie", "series", "tv"],
+    idPrefixes: ["rec_", "tt"]
 };
 
-// --- Yardımcılar ---
+// --- KATALOG URL YOLLARI ---
+const CATALOG_PATHS = {
+    'rec-canli-tv': '/api/channel/by/filtres/0/0/PAGE/' + SW_KEY + '/',
+    'rec-son-filmler': '/api/movie/by/filtres/0/created/PAGE/' + SW_KEY + '/',
+    'rec-son-diziler': '/api/serie/by/filtres/0/created/PAGE/' + SW_KEY + '/',
+    'rec-aksiyon': '/api/movie/by/filtres/1/created/PAGE/' + SW_KEY + '/',
+    'rec-korku': '/api/movie/by/filtres/8/created/PAGE/' + SW_KEY + '/'
+};
+
+// --- YARDIMCILAR ---
 async function getAuthToken() {
     const cached = cache.get("auth_token");
     if (cached) return cached;
@@ -44,42 +58,34 @@ async function getAuthToken() {
     } catch (e) { return null; }
 }
 
-const CATALOG_PATHS = {
-    'rec-canli-tv': '/api/channel/by/filtres/0/0/PAGE/' + SW_KEY + '/',
-    'rec-son-filmler': '/api/movie/by/filtres/0/created/PAGE/' + SW_KEY + '/',
-    'rec-son-diziler': '/api/serie/by/filtres/0/created/PAGE/' + SW_KEY + '/',
-    'rec-aksiyon': '/api/movie/by/filtres/1/created/PAGE/' + SW_KEY + '/',
-    'rec-korku': '/api/movie/by/filtres/8/created/PAGE/' + SW_KEY + '/'
-};
-
 // --- CORS ---
 app.use((req, res, next) => {
     res.setHeader('Access-Control-Allow-Origin', '*');
     res.setHeader('Access-Control-Allow-Headers', '*');
+    res.setHeader('Content-Type', 'application/json; charset=utf-8');
     next();
 });
 
-// --- Routes ---
+// --- ROUTES ---
 app.get('/', (req, res) => res.redirect('/manifest.json'));
 app.get('/manifest.json', (req, res) => res.json(MANIFEST));
 
-// --- Katalog İşleyici ---
+// --- CATALOG HANDLER ---
 app.get('/catalog/:type/:id/:extra?.json', async (req, res) => {
+    const { type, id } = req.params;
+    let skip = 0;
+    if (req.params.extra) {
+        const m = req.params.extra.match(/skip=(\d+)/);
+        if (m) skip = parseInt(m[1]);
+    }
+
+    const page = Math.floor(skip / 20) + 1;
+    const pathTemplate = CATALOG_PATHS[id];
+    if (!pathTemplate) return res.json({ metas: [] });
+
     try {
-        const { type, id } = req.params;
-        let skip = 0;
-        if (req.params.extra) {
-            const m = req.params.extra.match(/skip=(\d+)/);
-            if (m) skip = parseInt(m[1]);
-        }
-
-        const page = Math.floor(skip / 20) + 1;
-        const pathTemplate = CATALOG_PATHS[id];
-        if (!pathTemplate) return res.json({ metas: [] });
-
         const token = await getAuthToken();
         const finalUrl = BASE_URL + pathTemplate.replace('PAGE', page);
-        
         const response = await fetch(finalUrl, { headers: { ...HEADERS, 'Authorization': 'Bearer ' + token } });
         const data = await response.json();
         
@@ -98,20 +104,20 @@ app.get('/catalog/:type/:id/:extra?.json', async (req, res) => {
     }
 });
 
-// --- Meta İşleyici ---
+// --- META HANDLER ---
 app.get('/meta/:type/:id.json', async (req, res) => {
+    const { type, id } = req.params;
+    if (!id.startsWith('rec_')) return res.json({ meta: null });
+
+    const realId = id.replace('rec_', '');
+    const token = await getAuthToken();
+    
+    let endpoint;
+    if (type === 'tv') endpoint = `/api/channel/${realId}/${SW_KEY}/`;
+    else if (type === 'movie') endpoint = `/api/movie/${realId}/${SW_KEY}/`;
+    else endpoint = `/api/series/show/${realId}/${SW_KEY}/`;
+
     try {
-        const { type, id } = req.params;
-        if (!id.startsWith('rec_')) return res.json({ meta: null });
-
-        const realId = id.replace('rec_', '');
-        const token = await getAuthToken();
-        
-        let endpoint;
-        if (type === 'tv') endpoint = `/api/channel/${realId}/${SW_KEY}/`;
-        else if (type === 'movie') endpoint = `/api/movie/${realId}/${SW_KEY}/`;
-        else endpoint = `/api/series/show/${realId}/${SW_KEY}/`;
-
         const response = await fetch(BASE_URL + endpoint, { headers: { ...HEADERS, 'Authorization': 'Bearer ' + token } });
         const data = await response.json();
 
@@ -121,7 +127,7 @@ app.get('/meta/:type/:id.json', async (req, res) => {
             name: data.title || data.name,
             poster: data.poster_path || data.image || data.thumbnail,
             background: data.backdrop_path || data.image,
-            description: data.overview || data.description || "RECTV Yayını",
+            description: data.overview || data.description || "RECTV",
         };
 
         if (type === 'series' && data.seasons) {
@@ -130,30 +136,28 @@ app.get('/meta/:type/:id.json', async (req, res) => {
                     id: `${id}:${s.title.match(/\d+/)[0]}:${e.title.match(/\d+/)[0]}`,
                     title: e.title,
                     season: parseInt(s.title.match(/\d+/)[0]),
-                    episode: parseInt(e.title.match(/\d+/)[0]),
-                    released: new Date().toISOString()
+                    episode: parseInt(e.title.match(/\d+/)[0])
                 }))
             );
         }
-
         res.json({ meta });
     } catch (e) {
         res.json({ meta: null });
     }
 });
 
-// --- Stream İşleyici ---
+// --- STREAM HANDLER ---
 app.get('/stream/:type/:id.json', async (req, res) => {
-    try {
-        const { type, id } = req.params;
-        const token = await getAuthToken();
-        const headers = { ...HEADERS, 'Authorization': 'Bearer ' + token };
-        let streams = [];
+    const { type, id } = req.params;
+    const token = await getAuthToken();
+    const headers = { ...HEADERS, 'Authorization': 'Bearer ' + token };
+    let streams = [];
 
-        if (id.startsWith('rec_')) {
-            const parts = id.split(':');
-            const realId = parts[0].replace('rec_', '');
+    if (id.startsWith('rec_')) {
+        const parts = id.split(':');
+        const realId = parts[0].replace('rec_', '');
 
+        try {
             if (type === 'tv') {
                 const r = await fetch(`${BASE_URL}/api/channel/${realId}/${SW_KEY}/`, { headers });
                 const d = await r.json();
@@ -173,12 +177,9 @@ app.get('/stream/:type/:id.json', async (req, res) => {
                     streams.push({ name: 'RECTV', title: `Kaynak ${idx + 1}`, url: src.url });
                 });
             }
-        }
-
-        res.json({ streams });
-    } catch (e) {
-        res.json({ streams: [] });
+        } catch (e) {}
     }
+    res.json({ streams });
 });
 
-app.listen(PORT, () => console.log(`RECTV v5 Express — Port ${PORT}`));
+app.listen(PORT, () => console.log(`RECTV v5 Sinewix Style — Port ${PORT}`));
