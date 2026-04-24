@@ -1,25 +1,15 @@
 {
   "name": "rectv-addon",
-  "version": "1.2.0",
-  "description": "RecTV Katalog ve Stream Eklentisi",
+  "version": "5.0.0",
+  "description": "RecTV Express v5 eklentisi",
   "main": "index.js",
   "scripts": {
-    "start": "node index.js",
-    "dev": "nodemon index.js"
+    "start": "node index.js"
   },
-  "keywords": [
-    "stremio",
-    "addon",
-    "rectv",
-    "turkish",
-    "movies",
-    "series"
-  ],
-  "author": "MoOnCrOwN",
-  "license": "MIT",
+  "type": "module",
   "dependencies": {
+    "express": "^4.18.2",
     "node-fetch": "^3.3.2",
-    "stremio-addon-sdk": "^1.6.10"
-  },
-  "type": "module"
+    "node-cache": "^5.1.2"
+  }
 }
