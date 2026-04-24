@@ -17,7 +17,7 @@ const HEADERS = {
 
 // --- SINEWIX FORMATINDA MANIFEST ---
 const MANIFEST = {
-    id: "org.rectv.pro.v5",
+    id: "org.rectv.pro.v6",
     version: "5.0.0",
     name: "RECTV Pro v5",
     description: "RecTV Canlı TV, Film ve Dizi Kaynakları",
