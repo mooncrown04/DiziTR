@@ -1,19 +1,21 @@
 {
-  "name": "sinewix-addon",
-  "version": "1.1.0",
-  "description": "Sinewix Stremio eklentisi",
+  "name": "rectv-addon",
+  "version": "1.2.0",
+  "description": "RecTV Katalog ve Stream Eklentisi",
   "main": "index.js",
   "scripts": {
-    "start": "node index.js"
+    "start": "node index.js",
+    "dev": "nodemon index.js"
   },
   "keywords": [
     "stremio",
     "addon",
-    "streaming",
+    "rectv",
     "turkish",
+    "movies",
     "series"
   ],
-  "author": "",
+  "author": "MoOnCrOwN",
   "license": "MIT",
   "dependencies": {
     "node-fetch": "^3.3.2",
