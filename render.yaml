@@ -1,6 +1,6 @@
 services:
   - type: web
-    name: SineWix
+    name: Rec
     env: node
     plan: free
     buildCommand: npm install
