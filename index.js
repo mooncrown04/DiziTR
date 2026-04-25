@@ -13,18 +13,18 @@ const FULL_HEADERS = {
 };
 
 const manifest = {
-    id: "com.nuvio.rectv.v105", // Nuvio için daha standart bir ID formatı
-    version: "105.0.0",
-    name: "RECTV Pro Nuvio",
-    description: "Nuvio Özel: TV, Film ve Dizi",
+    id: "org.rectv.pro.multi.v70",
+    version: "70.0.0",
+    name: "RECTV Çoklu Katalog",
+    description: "Tüm kategoriler arama motoru ile besleniyor.",
     resources: ["catalog", "meta", "stream"],
-    types: ["tv", "movie", "series"], // TV'yi başa aldık
+    types: ["movie", "series"],
     idPrefixes: ["rectv"],
     catalogs: [
-        // Nuvio'da ID'lerin çok kısa ve net olması daha iyi sonuç verir
-        { id: "nuv-tv", type: "tv", name: "📺 Canlı Kanallar" },
-        { id: "nuv-mov", type: "movie", name: "🎬 Vizyon Filmleri" },
-        { id: "nuv-ser", type: "series", name: "🍿 Popüler Diziler" }
+        { id: "rectv-populer", type: "movie", name: "🔥 Popüler Filmler" },
+        { id: "rectv-yerli", type: "movie", name: "🇹🇷 Yerli Filmler" },
+        { id: "rectv-aksiyon", type: "movie", name: "💥 Aksiyon & Macera" },
+        { id: "rectv-dizi", type: "series", name: "📺 Güncel Diziler" }
     ]
 };
 
@@ -37,16 +37,23 @@ async function getAuthToken() {
     } catch (e) { return null; }
 }
 
-builder.defineCatalogHandler(async ({ type, id }) => {
+// --- AKILLI KATALOG HANDLER ---
+builder.defineCatalogHandler(async ({ type, id, extra }) => {
     const token = await getAuthToken();
     
-    // Nuvio'nun ana ekranını dolduracak anahtar kelimeler
-    let q = "2026";
-    if (id === "nuv-tv") q = "ulusal";
-    else if (id === "nuv-mov") q = "recep";
-    else if (id === "nuv-ser") q = "dizi";
+    // Hangi katalog için hangi kelimeyi aratacağımızı seçiyoruz
+    let searchTerm = "2024"; // Varsayılan
 
-    const searchUrl = `${BASE_URL}/api/search/${encodeURIComponent(q)}/${SW_KEY}/`;
+    if (extra.search) {
+        searchTerm = extra.search; // Kullanıcı bir şey aratırsa onu getir
+    } else {
+        if (id === "rectv-yerli") searchTerm = "yerli";
+        else if (id === "rectv-aksiyon") searchTerm = "aksiyon";
+        else if (id === "rectv-dizi") searchTerm = "2023"; // Diziler için genel bir tarih
+        else if (id === "rectv-populer") searchTerm = "recep"; // Popülerler için sağlam bir başlangıç
+    }
+
+    const searchUrl = `${BASE_URL}/api/search/${encodeURIComponent(searchTerm)}/${SW_KEY}/`;
 
     try {
         const response = await fetch(searchUrl, {
@@ -54,45 +61,74 @@ builder.defineCatalogHandler(async ({ type, id }) => {
         });
         const data = await response.json();
         
-        // Senin JSON yapındaki doğru diziyi bulalım
-        let raw = [];
-        if (id === "nuv-tv") raw = data.channels || [];
-        else raw = data.posters || data.series || [];
+        // JSON'dan posterleri veya dizileri çek
+        const rawItems = (type === 'movie' ? data.posters : data.series) || data.posters || [];
 
-        const metas = raw.map(item => ({
+        const metas = rawItems.map(item => ({
             id: `rectv:${type}:${item.id}`,
             type: type,
             name: item.title || item.name,
-            poster: item.image || item.thumbnail || "https://via.placeholder.com/300x450?text=TV",
+            poster: item.image || item.poster_path,
             description: item.label || "RECTV"
         }));
 
         return { metas };
-    } catch (e) { return { metas: [] }; }
+    } catch (e) {
+        return { metas: [] };
+    }
 });
 
-// Meta ve Stream kısımları (Önceki stabil yapı)
+// --- META HANDLER ---
 builder.defineMetaHandler(async ({ id, type }) => {
     const realId = id.split(':')[2];
     const token = await getAuthToken();
-    const ep = type === 'tv' ? `/api/channel/${realId}/${SW_KEY}/` : (type === 'movie' ? `/api/movie/${realId}/${SW_KEY}/` : `/api/series/show/${realId}/${SW_KEY}/`);
+    const endpoint = type === 'movie' ? `/api/movie/${realId}/${SW_KEY}/` : `/api/series/show/${realId}/${SW_KEY}/`;
+
     try {
-        const res = await fetch(BASE_URL + ep, { headers: { ...FULL_HEADERS, 'Authorization': `Bearer ${token}` } });
-        const d = await res.json();
-        return { meta: { id, type, name: d.title || d.name, poster: d.image || d.thumbnail, background: d.cover || d.image, description: d.description } };
+        const res = await fetch(BASE_URL + endpoint, {
+            headers: { ...FULL_HEADERS, 'Authorization': `Bearer ${token}` }
+        });
+        const data = await res.json();
+        return {
+            meta: {
+                id: id,
+                type: type,
+                name: data.title || data.name,
+                poster: data.image || data.poster_path,
+                background: data.cover || data.backdrop_path,
+                description: data.description || data.overview
+            }
+        };
     } catch (e) { return { meta: {} }; }
 });
 
+// --- STREAM HANDLER ---
 builder.defineStreamHandler(async ({ id, type }) => {
     const realId = id.split(':')[2];
     const token = await getAuthToken();
-    const ep = type === 'tv' ? `/api/channel/${realId}/${SW_KEY}/` : (type === 'movie' ? `/api/movie/${realId}/${SW_KEY}/` : `/api/series/show/${realId}/${SW_KEY}/`);
+    
+    // Önce detay sayfasına gidip kaynakları (sources) alıyoruz
+    const endpoint = type === 'movie' ? `/api/movie/${realId}/${SW_KEY}/` : `/api/series/show/${realId}/${SW_KEY}/`;
+
     try {
-        const res = await fetch(BASE_URL + ep, { headers: { ...FULL_HEADERS, 'Authorization': `Bearer ${token}` } });
-        const d = await res.json();
-        let streams = [];
-        if (type === 'tv' && d.url) streams.push({ name: "TV", title: "Canlı", url: d.url });
-        else (d.sources || []).forEach(src => streams.push({ name: "RECTV", title: src.quality || "HD", url: src.url }));
+        const res = await fetch(BASE_URL + endpoint, {
+            headers: { ...FULL_HEADERS, 'Authorization': `Bearer ${token}` }
+        });
+        const data = await res.json();
+        
+        let sources = data.sources || [];
+
+        // Eğer diziyse (Örnek olarak ilk sezon ilk bölüm kaynaklarını getirir - Geliştirilebilir)
+        if (type === 'series' && data.seasons && data.seasons[0]) {
+            sources = data.seasons[0].episodes[0].sources || [];
+        }
+
+        const streams = sources.map((src, i) => ({
+            name: "RECTV",
+            title: `${src.title || 'Kaynak'} - ${src.quality || 'HD'}`,
+            url: src.url
+        }));
+
         return { streams };
     } catch (e) { return { streams: [] }; }
 });
