@@ -14,43 +14,40 @@ const FULL_HEADERS = {
 };
 
 const manifest = {
-    id: "com.nuvio.rectv.cinemeta.style.v290",
-    version: "290.0.0",
-    name: "RECTV Dual Pro",
-    description: "Film ve Dizi Katalogları (Cinemeta Yapısında)",
+    id: "com.nuvio.rectv.tvmode.v320",
+    version: "3.2.0",
+    name: "RECTV Pro",
+    description: "Film ve TV Katalogları Ayrıştırıldı",
     resources: ["catalog", "meta", "stream"],
-    types: ["movie", "series"],
+    types: ["movie", "tv"], // series yerine tv kullanıyoruz
     idPrefixes: ["tt"],
     catalogs: [
-        // FİLM KATALOĞU (Arama Destekli)
         {
+            id: "rectv_movie_search", 
             type: "movie",
-            id: "rectv_top_movies",
-            name: "🎬 RECTV Popüler Filmler",
-            extra: [{ name: "search" }, { name: "skip" }]
+            name: "RECTV",
+            extra: [{ name: "search", isRequired: false }]
         },
-        // DİZİ KATALOĞU (Arama Destekli)
         {
-            type: "series",
-            id: "rectv_top_series",
-            name: "🍿 RECTV Popüler Diziler",
-            extra: [{ name: "search" }, { name: "skip" }]
+            id: "rectv_tv_search", 
+            type: "tv", // Tetikleyiciyi tv yaptık
+            name: "RECTV",
+            extra: [{ name: "search", isRequired: false }]
         }
     ]
 };
 
 const builder = new addonBuilder(manifest);
 
-// --- YARDIMCI: IMDb ID EŞLEME ---
+// --- IMDb ID BULUCU ---
 async function findRealImdbId(title, year, type) {
     try {
-        const searchType = type === 'series' ? 'tv' : 'movie';
+        // TMDB'de dizi araması için 'tv' kullanılır
+        const searchType = type === 'tv' ? 'tv' : 'movie';
         const cleanYear = year ? year.toString().match(/\d{4}/)?.[0] : "";
         const url = `https://api.themoviedb.org/3/search/${searchType}?api_key=${TMDB_KEY}&query=${encodeURIComponent(title)}${cleanYear ? `&year=${cleanYear}` : ""}&language=tr-TR`;
-        
         const res = await fetch(url);
         const data = await res.json();
-        
         if (data.results && data.results.length > 0) {
             const ext = await fetch(`https://api.themoviedb.org/3/${searchType}/${data.results[0].id}/external_ids?api_key=${TMDB_KEY}`);
             const extData = await ext.json();
@@ -60,27 +57,26 @@ async function findRealImdbId(title, year, type) {
     return null;
 }
 
-// --- KATALOG HANDLER (CINEMETA MANTIĞI) ---
-builder.defineCatalogHandler(async ({ type, id, extra }) => {
+// --- KATALOG HANDLER ---
+builder.defineCatalogHandler(async (args) => {
+    const { type, id, extra } = args;
     let rawItems = [];
-    const query = extra.search;
 
     try {
-        if (query) {
-            // ARAMA YAPILIYORSA
-            const searchUrl = `${BASE_URL}/api/search/${encodeURIComponent(query)}/${SW_KEY}/`;
+        if (extra && extra.search) {
+            const searchUrl = `${BASE_URL}/api/search/${encodeURIComponent(extra.search)}/${SW_KEY}/`;
             const response = await fetch(searchUrl, { headers: FULL_HEADERS });
             const data = await response.json();
 
-            // Sadece sorgulanan tipe ait olanı al (Cinemeta böyle yapar)
-            if (type === 'movie') {
+            // Arama sonuçlarında RecTV 'series' içinde dizi döner
+            if (id === "rectv_movie_search") {
                 rawItems = data.posters || [];
-            } else if (type === 'series') {
-                rawItems = data.series || [];
+            } else if (id === "rectv_tv_search") {
+                rawItems = data.series || []; // RecTV'nin dizilerini tv kataloğuna basıyoruz
             }
         } else {
-            // ANA SAYFA LİSTELEME
-            const apiPath = type === 'series' ? 'serie' : 'movie';
+            // Ana sayfa: Diziler için hala 'serie' API endpointini kullanıyoruz
+            const apiPath = type === 'tv' ? 'serie' : 'movie';
             const targetUrl = `${BASE_URL}/api/${apiPath}/by/filtres/0/created/0/${SW_KEY}/`;
             const response = await fetch(targetUrl, { headers: FULL_HEADERS });
             const data = await response.json();
@@ -91,7 +87,6 @@ builder.defineCatalogHandler(async ({ type, id, extra }) => {
             const title = item.title || item.name;
             const year = item.year || item.sublabel;
             const imdbId = await findRealImdbId(title, year, type);
-
             if (!imdbId) return null;
 
             return {
@@ -99,20 +94,19 @@ builder.defineCatalogHandler(async ({ type, id, extra }) => {
                 type: type,
                 name: title,
                 poster: item.image || item.thumbnail,
-                description: `RecTV Engine - ${year || ''}`
+                description: `RecTV ${type === 'tv' ? 'Dizi' : 'Film'} | ${year || ''}`
             };
         }));
 
         return { metas: metas.filter(m => m !== null) };
-
     } catch (e) {
         return { metas: [] };
     }
 });
 
-// Meta ve Stream Handler kısımları önceki kodla aynı kalacak şekilde devam eder...
 builder.defineMetaHandler(async ({ id }) => ({ meta: { id } }));
 
+// --- STREAM HANDLER ---
 builder.defineStreamHandler(async ({ id, type }) => {
     try {
         const tmdbRes = await fetch(`https://api.themoviedb.org/3/find/${id}?api_key=${TMDB_KEY}&external_source=imdb_id&language=tr-TR`);
@@ -124,12 +118,14 @@ builder.defineStreamHandler(async ({ id, type }) => {
         const sRes = await fetch(`${BASE_URL}/api/search/${encodeURIComponent(title)}/${SW_KEY}/`, { headers: FULL_HEADERS });
         const sData = await sRes.json();
         
-        const pool = type === 'series' ? (sData.series || []) : (sData.posters || []);
+        // Havuz seçimi: tv ise series listesine bak
+        const pool = type === 'tv' ? (sData.series || []) : (sData.posters || []);
         const found = pool.find(p => (p.title || p.name).toLowerCase().includes(title.toLowerCase()));
 
         if (!found) return { streams: [] };
 
-        const res = await fetch(`${BASE_URL}/api/${type === 'series' ? 'serie' : 'movie'}/${found.id}/${SW_KEY}/`, { headers: FULL_HEADERS });
+        // Link alma: tv ise 'serie' endpointine git
+        const res = await fetch(`${BASE_URL}/api/${type === 'tv' ? 'serie' : 'movie'}/${found.id}/${SW_KEY}/`, { headers: FULL_HEADERS });
         const finalData = await res.json();
         
         return { 
