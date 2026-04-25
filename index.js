@@ -13,42 +13,34 @@ const FULL_HEADERS = {
     'hash256': '711bff4afeb47f07ab08a0b07e85d3835e739295e8a6361db77eebd93d96306b'
 };
 
-// Senin paylaştığın veriden alınan kesin ID eşleşmeleri
 const CATEGORY_MAP = {
-    "Korku": "8",
-    "Gerilim": "9",
-    "Gizem": "15",
-    "Suç": "22",
-    "Macera": "2",
-    "Aksiyon": "1",
-    "Komedi": "4",
-    "Animasyon": "3",
-    "Türkçe Dublaj": "26",
-    "Türkçe Altyazı": "27"
+    "Aksiyon": "1", "Macera": "2", "Animasyon": "3", "Komedi": "4",
+    "Suç": "5", "Drama": "8", "Korku": "8", "Gerilim": "9",
+    "Gizem": "15", "Bilim-Kurgu": "16", "Türkçe Dublaj": "26", "Türkçe Altyazı": "27"
 };
 
 const GENRES = Object.keys(CATEGORY_MAP);
 
 const manifest = {
-    id: "com.nuvio.rectv.v430",
-    version: "4.3.0",
+    id: "com.nuvio.rectv.v440",
+    version: "4.4.0",
     name: "RECTV Pro Dual",
-    description: "Kategori ID'leri Güncellendi",
+    description: "Arama ve Kategori Senkronize Edildi",
     resources: ["catalog", "meta", "stream"],
     types: ["movie", "series"],
     idPrefixes: ["tt"],
     catalogs: [
         {
-            id: "rectv_movie",
-            type: "movie",
-            name: "🎬 RECTV Filmler",
-            extra: [{ name: "search" }, { name: "genre", options: GENRES }]
-        },
-        {
             id: "rectv_series",
             type: "series",
             name: "🍿 RECTV Diziler",
-            extra: [{ name: "search" }, { name: "genre", options: GENRES }]
+            extra: [{ name: "search", isRequired: false }, { name: "genre", options: GENRES, isRequired: false }]
+        },
+        {
+            id: "rectv_movie",
+            type: "movie",
+            name: "🎬 RECTV Filmler",
+            extra: [{ name: "search", isRequired: false }, { name: "genre", options: GENRES, isRequired: false }]
         }
     ]
 };
@@ -58,8 +50,7 @@ const builder = new addonBuilder(manifest);
 async function findRealImdbId(title, year, type) {
     try {
         const searchType = type === 'series' ? 'tv' : 'movie';
-        const cleanYear = year ? year.toString().match(/\d{4}/)?.[0] : "";
-        const url = `https://api.themoviedb.org/3/search/${searchType}?api_key=${TMDB_KEY}&query=${encodeURIComponent(title)}${cleanYear ? `&year=${cleanYear}` : ""}&language=tr-TR`;
+        const url = `https://api.themoviedb.org/3/search/${searchType}?api_key=${TMDB_KEY}&query=${encodeURIComponent(title)}&language=tr-TR`;
         const res = await fetch(url);
         const data = await res.json();
         if (data.results && data.results.length > 0) {
@@ -76,15 +67,22 @@ builder.defineCatalogHandler(async (args) => {
     let rawItems = [];
 
     try {
+        // 1. ARAMA (Dizileri tetikleyen kısım)
         if (extra && extra.search) {
             const searchUrl = `${BASE_URL}/api/search/${encodeURIComponent(extra.search)}/${SW_KEY}/`;
             const response = await fetch(searchUrl, { headers: FULL_HEADERS });
             const data = await response.json();
-            rawItems = (type === "series") ? (data.series || []) : (data.posters || []);
+            
+            // Veriyi türüne göre kesin ayırıyoruz
+            if (type === "series") {
+                rawItems = data.series || [];
+            } else {
+                rawItems = data.posters || [];
+            }
         } 
+        // 2. KATEGORİ VEYA ANA SAYFA
         else {
             const apiPath = type === 'series' ? 'serie' : 'movie';
-            // Eğer kategori seçildiyse CATEGORY_MAP'ten ID alıyoruz, yoksa 0 (hepsi)
             const genreId = (extra && extra.genre) ? (CATEGORY_MAP[extra.genre] || "0") : "0";
             const targetUrl = `${BASE_URL}/api/${apiPath}/by/filtres/${genreId}/created/0/${SW_KEY}/`;
             
@@ -114,7 +112,8 @@ builder.defineCatalogHandler(async (args) => {
 
 builder.defineMetaHandler(async ({ id }) => ({ meta: { id } }));
 
-builder.defineStreamHandler(async ({ id, type }) => {
+builder.defineStreamHandler(async (args) => {
+    const { id, type } = args;
     try {
         const tmdbRes = await fetch(`https://api.themoviedb.org/3/find/${id}?api_key=${TMDB_KEY}&external_source=imdb_id&language=tr-TR`);
         const tmdbData = await tmdbRes.json();
@@ -130,7 +129,8 @@ builder.defineStreamHandler(async ({ id, type }) => {
 
         if (!found) return { streams: [] };
 
-        const res = await fetch(`${BASE_URL}/api/${type === 'series' ? 'serie' : 'movie'}/${found.id}/${SW_KEY}/`, { headers: FULL_HEADERS });
+        const apiPath = type === 'series' ? 'serie' : 'movie';
+        const res = await fetch(`${BASE_URL}/api/${apiPath}/${found.id}/${SW_KEY}/`, { headers: FULL_HEADERS });
         const finalData = await res.json();
         
         return { 
