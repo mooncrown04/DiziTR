@@ -13,18 +13,18 @@ const FULL_HEADERS = {
 };
 
 const manifest = {
-    id: "com.nuvio.rectv.v105", // Nuvio için daha standart bir ID formatı
-    version: "105.0.0",
-    name: "RECTV Pro Nuvio",
-    description: "Nuvio Özel: TV, Film ve Dizi",
+    id: "org.rectv.pro.fixed.v95", // Her seferinde ID'yi değiştiriyoruz
+    version: "95.0.0",
+    name: "RECTV Pro + Katalog",
+    description: "Tüm Kataloglar ve TV Aktif",
     resources: ["catalog", "meta", "stream"],
-    types: ["tv", "movie", "series"], // TV'yi başa aldık
+    types: ["movie", "series", "tv"],
     idPrefixes: ["rectv"],
     catalogs: [
-        // Nuvio'da ID'lerin çok kısa ve net olması daha iyi sonuç verir
-        { id: "nuv-tv", type: "tv", name: "📺 Canlı Kanallar" },
-        { id: "nuv-mov", type: "movie", name: "🎬 Vizyon Filmleri" },
-        { id: "nuv-ser", type: "series", name: "🍿 Popüler Diziler" }
+        // Movie tipindeki kataloglar ana ekranda daha kolay görünür
+        { id: "rectv-movies-pop", type: "movie", name: "🎬 RECTV Popüler Filmler" },
+        { id: "rectv-series-pop", type: "series", name: "🍿 RECTV Popüler Diziler" },
+        { id: "rectv-tv-channels", type: "tv", name: "📺 RECTV Canlı TV" }
     ]
 };
 
@@ -37,16 +37,18 @@ async function getAuthToken() {
     } catch (e) { return null; }
 }
 
-builder.defineCatalogHandler(async ({ type, id }) => {
+builder.defineCatalogHandler(async ({ type, id, extra }) => {
     const token = await getAuthToken();
     
-    // Nuvio'nun ana ekranını dolduracak anahtar kelimeler
-    let q = "2026";
-    if (id === "nuv-tv") q = "ulusal";
-    else if (id === "nuv-mov") q = "recep";
-    else if (id === "nuv-ser") q = "dizi";
+    // Katalog eşleşmeleri (Senin JSON çıktındaki "posters" ve "channels" yapısına göre)
+    let searchTerm = "2026";
+    if (id === "rectv-tv-channels") searchTerm = "kanal";
+    else if (id === "rectv-movies-pop") searchTerm = "recep";
+    else if (id === "rectv-series-pop") searchTerm = "dizi";
+    
+    if (extra.search) searchTerm = extra.search;
 
-    const searchUrl = `${BASE_URL}/api/search/${encodeURIComponent(q)}/${SW_KEY}/`;
+    const searchUrl = `${BASE_URL}/api/search/${encodeURIComponent(searchTerm)}/${SW_KEY}/`;
 
     try {
         const response = await fetch(searchUrl, {
@@ -54,45 +56,47 @@ builder.defineCatalogHandler(async ({ type, id }) => {
         });
         const data = await response.json();
         
-        // Senin JSON yapındaki doğru diziyi bulalım
-        let raw = [];
-        if (id === "nuv-tv") raw = data.channels || [];
-        else raw = data.posters || data.series || [];
+        // JSON yapısını analiz et ve doğru diziyi seç
+        let items = [];
+        if (id === "rectv-tv-channels") items = data.channels || [];
+        else items = data.posters || data.series || [];
 
-        const metas = raw.map(item => ({
+        const metas = items.map(item => ({
             id: `rectv:${type}:${item.id}`,
             type: type,
             name: item.title || item.name,
-            poster: item.image || item.thumbnail || "https://via.placeholder.com/300x450?text=TV",
+            poster: item.image || item.thumbnail || "https://via.placeholder.com/300x450?text=YOK",
             description: item.label || "RECTV"
         }));
 
-        return { metas };
-    } catch (e) { return { metas: [] }; }
+        return { metas: metas };
+    } catch (e) {
+        return { metas: [] };
+    }
 });
 
-// Meta ve Stream kısımları (Önceki stabil yapı)
+// META ve STREAM kısımları önceki çalışan yapıyla aynı kalıyor...
 builder.defineMetaHandler(async ({ id, type }) => {
     const realId = id.split(':')[2];
     const token = await getAuthToken();
-    const ep = type === 'tv' ? `/api/channel/${realId}/${SW_KEY}/` : (type === 'movie' ? `/api/movie/${realId}/${SW_KEY}/` : `/api/series/show/${realId}/${SW_KEY}/`);
+    const endpoint = type === 'tv' ? `/api/channel/${realId}/${SW_KEY}/` : (type === 'movie' ? `/api/movie/${realId}/${SW_KEY}/` : `/api/series/show/${realId}/${SW_KEY}/`);
     try {
-        const res = await fetch(BASE_URL + ep, { headers: { ...FULL_HEADERS, 'Authorization': `Bearer ${token}` } });
-        const d = await res.json();
-        return { meta: { id, type, name: d.title || d.name, poster: d.image || d.thumbnail, background: d.cover || d.image, description: d.description } };
+        const res = await fetch(BASE_URL + endpoint, { headers: { ...FULL_HEADERS, 'Authorization': `Bearer ${token}` } });
+        const data = await res.json();
+        return { meta: { id, type, name: data.title || data.name, poster: data.image || data.thumbnail, background: data.cover || data.image, description: data.description } };
     } catch (e) { return { meta: {} }; }
 });
 
 builder.defineStreamHandler(async ({ id, type }) => {
     const realId = id.split(':')[2];
     const token = await getAuthToken();
-    const ep = type === 'tv' ? `/api/channel/${realId}/${SW_KEY}/` : (type === 'movie' ? `/api/movie/${realId}/${SW_KEY}/` : `/api/series/show/${realId}/${SW_KEY}/`);
+    const endpoint = type === 'tv' ? `/api/channel/${realId}/${SW_KEY}/` : (type === 'movie' ? `/api/movie/${realId}/${SW_KEY}/` : `/api/series/show/${realId}/${SW_KEY}/`);
     try {
-        const res = await fetch(BASE_URL + ep, { headers: { ...FULL_HEADERS, 'Authorization': `Bearer ${token}` } });
-        const d = await res.json();
+        const res = await fetch(BASE_URL + endpoint, { headers: { ...FULL_HEADERS, 'Authorization': `Bearer ${token}` } });
+        const data = await res.json();
         let streams = [];
-        if (type === 'tv' && d.url) streams.push({ name: "TV", title: "Canlı", url: d.url });
-        else (d.sources || []).forEach(src => streams.push({ name: "RECTV", title: src.quality || "HD", url: src.url }));
+        if (type === 'tv' && data.url) streams.push({ name: "RECTV", title: "Canlı Yayın", url: data.url });
+        else (data.sources || []).forEach(src => streams.push({ name: "RECTV", title: src.quality || "HD", url: src.url }));
         return { streams };
     } catch (e) { return { streams: [] }; }
 });
