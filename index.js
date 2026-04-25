@@ -13,34 +13,42 @@ const FULL_HEADERS = {
     'hash256': '711bff4afeb47f07ab08a0b07e85d3835e739295e8a6361db77eebd93d96306b'
 };
 
-const GENRES = ["Aksiyon", "Macera", "Animasyon", "Komedi", "Suç", "Belgesel", "Drama", "Korku", "Bilim-Kurgu", "Gerilim"];
+// Senin paylaştığın veriden alınan kesin ID eşleşmeleri
+const CATEGORY_MAP = {
+    "Korku": "8",
+    "Gerilim": "9",
+    "Gizem": "15",
+    "Suç": "22",
+    "Macera": "2",
+    "Aksiyon": "1",
+    "Komedi": "4",
+    "Animasyon": "3",
+    "Türkçe Dublaj": "26",
+    "Türkçe Altyazı": "27"
+};
+
+const GENRES = Object.keys(CATEGORY_MAP);
 
 const manifest = {
-    id: "com.nuvio.rectv.v410",
-    version: "4.1.0",
+    id: "com.nuvio.rectv.v430",
+    version: "4.3.0",
     name: "RECTV Pro Dual",
-    description: "Dizi ve Film Arama Tam Destek",
+    description: "Kategori ID'leri Güncellendi",
     resources: ["catalog", "meta", "stream"],
     types: ["movie", "series"],
     idPrefixes: ["tt"],
     catalogs: [
         {
-            id: "rectv_series",
-            type: "series",
-            name: "🍿 RECTV Diziler",
-            extra: [
-                { name: "search", isRequired: false },
-                { name: "genre", options: GENRES, isRequired: false }
-            ]
-        },
-        {
             id: "rectv_movie",
             type: "movie",
             name: "🎬 RECTV Filmler",
-            extra: [
-                { name: "search", isRequired: false },
-                { name: "genre", options: GENRES, isRequired: false }
-            ]
+            extra: [{ name: "search" }, { name: "genre", options: GENRES }]
+        },
+        {
+            id: "rectv_series",
+            type: "series",
+            name: "🍿 RECTV Diziler",
+            extra: [{ name: "search" }, { name: "genre", options: GENRES }]
         }
     ]
 };
@@ -68,29 +76,21 @@ builder.defineCatalogHandler(async (args) => {
     let rawItems = [];
 
     try {
-        // 1. ARAMA TETİKLENDİYSE
         if (extra && extra.search) {
             const searchUrl = `${BASE_URL}/api/search/${encodeURIComponent(extra.search)}/${SW_KEY}/`;
             const response = await fetch(searchUrl, { headers: FULL_HEADERS });
             const data = await response.json();
             rawItems = (type === "series") ? (data.series || []) : (data.posters || []);
         } 
-        // 2. KATEGORİ VEYA ANA SAYFA
         else {
             const apiPath = type === 'series' ? 'serie' : 'movie';
-            const targetUrl = `${BASE_URL}/api/${apiPath}/by/filtres/0/created/0/${SW_KEY}/`;
+            // Eğer kategori seçildiyse CATEGORY_MAP'ten ID alıyoruz, yoksa 0 (hepsi)
+            const genreId = (extra && extra.genre) ? (CATEGORY_MAP[extra.genre] || "0") : "0";
+            const targetUrl = `${BASE_URL}/api/${apiPath}/by/filtres/${genreId}/created/0/${SW_KEY}/`;
+            
             const response = await fetch(targetUrl, { headers: FULL_HEADERS });
             const data = await response.json();
             rawItems = Array.isArray(data) ? data : (data.posters || []);
-            
-            // Eğer kategori (genre) seçilmişse ve API desteklemiyorsa bile listeyi boş döndürme
-            if (extra && extra.genre) {
-                const filtered = rawItems.filter(i => 
-                    (i.title || i.name || "").toLowerCase().includes(extra.genre.toLowerCase())
-                );
-                // Filtreleme sonucu boşsa tüm listeyi göster (Kataloğun çökmesini önler)
-                if (filtered.length > 0) rawItems = filtered;
-            }
         }
 
         const metas = await Promise.all(rawItems.slice(0, 15).map(async (item) => {
@@ -109,9 +109,7 @@ builder.defineCatalogHandler(async (args) => {
         }));
 
         return { metas: metas.filter(m => m !== null) };
-    } catch (e) {
-        return { metas: [] };
-    }
+    } catch (e) { return { metas: [] }; }
 });
 
 builder.defineMetaHandler(async ({ id }) => ({ meta: { id } }));
