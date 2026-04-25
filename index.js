@@ -14,122 +14,134 @@ const HEADERS = {
 };
 
 const manifest = {
-    id: "com.nuvio.rectv.v520",
-    version: "5.2.0",
-    name: "RECTV LOGGERS",
-    description: "Tüm Hatalar Console Error Olarak Basılır",
+    id: "com.nuvio.rectv.v530",
+    version: "5.3.0",
+    name: "RECTV FULL DEBUG",
+    description: "Arama ve Film Katalogları Onarıldı",
     resources: ["catalog", "meta", "stream"],
-    types: ["movie", "tv", "series"], // Nuvio "tv" gönderdiği için ekledik
+    types: ["movie", "tv", "series"], 
     idPrefixes: ["tt"],
     catalogs: [
-        { id: "rectv_tv", type: "tv", name: "🍿 RECTV Diziler" },
-        { id: "rectv_movie", type: "movie", name: "🎬 RECTV Filmler" }
+        { id: "rectv_movie", type: "movie", name: "🎬 RECTV Filmler", extra: [{ name: "search" }, { name: "genre", options: ["Aksiyon", "Korku", "Komedi"] }] },
+        { id: "rectv_tv", type: "tv", name: "🍿 RECTV Diziler", extra: [{ name: "search" }, { name: "genre", options: ["Dizi", "Animasyon"] }] }
     ]
 };
 
 const builder = new addonBuilder(manifest);
 
+// --- KATALOG VE ARAMA LOGLAYICI ---
 builder.defineCatalogHandler(async (args) => {
-    console.error(`[RECTV] Katalog Isteği: Type=${args.type} Search=${args.extra?.search || 'Yok'}`);
+    // Arama yapıldığında veya kataloğa girildiğinde İLK BURASI ÇALIŞIR
+    console.error(`!!! [KATALOG_ISTEGI] Tip: ${args.type} | Arama: ${args.extra?.search || 'Yok'}`);
+
     try {
-        const type = args.type;
-        const isSearch = args.extra && args.extra.search;
-        const apiPath = (type === 'tv' || type === 'series') ? 'serie' : 'movie';
+        const { type, extra } = args;
+        const isSearch = extra && extra.search;
+        // Nuvio'da dizi için hem 'tv' hem 'series' gelebilir, film için 'movie'
+        const apiPath = (type === 'movie') ? 'movie' : 'serie';
         
         let url = isSearch 
-            ? `${BASE_URL}/api/search/${encodeURIComponent(args.extra.search)}/${SW_KEY}/`
+            ? `${BASE_URL}/api/search/${encodeURIComponent(extra.search)}/${SW_KEY}/`
             : `${BASE_URL}/api/${apiPath}/by/filtres/0/created/0/${SW_KEY}/`;
+
+        console.error(`[API_YOLU]: ${url}`);
 
         const response = await fetch(url, { headers: HEADERS });
         const data = await response.json();
-        let rawItems = (apiPath === 'serie') ? (data.series || data) : (data.posters || data);
+        
+        // Gelen veriyi kontrol et
+        let rawItems = (apiPath === 'movie') ? (data.posters || data) : (data.series || data);
+        if (!Array.isArray(rawItems)) {
+            console.error("[HATA] API'den dizi/film listesi gelmedi!");
+            rawItems = [];
+        }
 
-        const metas = await Promise.all((rawItems || []).slice(0, 10).map(async (item) => {
+        const metas = await Promise.all(rawItems.slice(0, 20).map(async (item) => {
             const title = item.title || item.name;
-            const tmdbType = (apiPath === 'serie') ? 'tv' : 'movie';
-            const tmdbRes = await fetch(`https://api.themoviedb.org/3/search/${tmdbType}?api_key=${TMDB_KEY}&query=${encodeURIComponent(title)}&language=tr-TR`);
-            const tmdbData = await tmdbRes.json();
+            const tmdbType = (apiPath === 'movie') ? 'movie' : 'tv';
             
-            if (tmdbData.results?.[0]) {
-                const ext = await fetch(`https://api.themoviedb.org/3/${tmdbType}/${tmdbData.results[0].id}/external_ids?api_key=${TMDB_KEY}`);
-                const extData = await ext.json();
-                if (extData.imdb_id) {
-                    return {
-                        id: (apiPath === 'serie') ? `${extData.imdb_id}:tv` : extData.imdb_id,
-                        type: type,
-                        name: title,
-                        poster: item.image || item.thumbnail
-                    };
+            try {
+                const tmdbRes = await fetch(`https://api.themoviedb.org/3/search/${tmdbType}?api_key=${TMDB_KEY}&query=${encodeURIComponent(title)}&language=tr-TR`);
+                const tmdbData = await tmdbRes.json();
+                
+                if (tmdbData.results?.[0]) {
+                    const ext = await fetch(`https://api.themoviedb.org/3/${tmdbType}/${tmdbData.results[0].id}/external_ids?api_key=${TMDB_KEY}`);
+                    const extData = await ext.json();
+                    
+                    if (extData.imdb_id) {
+                        return {
+                            id: (apiPath === 'serie') ? `${extData.imdb_id}:tv` : extData.imdb_id,
+                            type: type, // movie veya tv
+                            name: title,
+                            poster: item.image || item.thumbnail,
+                            description: `RecTV | ${item.year || ''}`
+                        };
+                    }
                 }
+            } catch (tmdbErr) {
+                console.error(`[TMDB_HATA] ${title} için ID alınamadı`);
             }
             return null;
         }));
+
         return { metas: metas.filter(m => m !== null) };
     } catch (e) {
-        console.error("[RECTV] Katalog Hatası:", e.message);
+        console.error("[KRITIK_KATALOG_HATASI]:", e.message);
         return { metas: [] };
     }
 });
 
 builder.defineMetaHandler(async ({ id }) => ({ meta: { id } }));
 
+// --- STREAM (POSTERE TIKLAMA) LOGLAYICI ---
 builder.defineStreamHandler(async (args) => {
-    // SENİN İSTEDİĞİN CONSOLE ERROR BURASI
-    console.error("--- !!! NUVIO POSTERE BASTI !!! ---");
-    console.error("[NUVIO_RAW_ARGS]:", JSON.stringify(args, null, 2));
+    console.error("--- !!! POSTERE BASILDI !!! ---");
+    console.error("[ARGS_TAM_LISTE]:", JSON.stringify(args, null, 2));
 
     const { id, type } = args;
     const cleanId = id.split(":")[0];
-    const isSeries = id.includes(":tv") || type === "tv" || type === "series";
+    // Nuvio'da filmler 'movie', diziler 'tv' veya 'series' gelir
+    const isActuallySeries = id.includes(":tv") || type === "tv" || type === "series";
 
     try {
-        // 1. TMDB Bilgisi
+        const tmdbType = isActuallySeries ? 'tv' : 'movie';
         const tmdbUrl = `https://api.themoviedb.org/3/find/${cleanId}?api_key=${TMDB_KEY}&external_source=imdb_id&language=tr-TR`;
         const tmdbRes = await fetch(tmdbUrl);
         const tmdbData = await tmdbRes.json();
-        const tmdbItem = isSeries ? tmdbData.tv_results?.[0] : tmdbData.movie_results?.[0];
+        const tmdbItem = isActuallySeries ? tmdbData.tv_results?.[0] : tmdbData.movie_results?.[0];
 
         if (!tmdbItem) {
-            console.error("[RECTV_HATA] TMDB ID Bulunamadı:", cleanId);
+            console.error(`[HATA] IMDB ${cleanId} TMDB'de karşılık bulamadı.`);
             return { streams: [] };
         }
 
         const trTitle = (tmdbItem.name || tmdbItem.title);
-        console.error(`[RECTV_INFO] Aranan Başlık: ${trTitle} (Tür: ${isSeries ? 'Dizi' : 'Film'})`);
+        console.error(`[BILGI] RecTV Aranan: ${trTitle} | Tür: ${tmdbType}`);
 
-        // 2. RecTV Arama
         const sRes = await fetch(`${BASE_URL}/api/search/${encodeURIComponent(trTitle)}/${SW_KEY}/`, { headers: HEADERS });
         const sData = await sRes.json();
-        const pool = isSeries ? (sData.series || []) : (sData.posters || []);
-
+        
+        const pool = isActuallySeries ? (sData.series || []) : (sData.posters || []);
         const target = pool.find(p => (p.title || p.name).toLowerCase().includes(trTitle.toLowerCase()));
+
         if (!target) {
-            console.error("[RECTV_HATA] RecTV API'sinde bu isimde bir şey yok.");
+            console.error(`[HATA] RecTV API'de '${trTitle}' bulunamadı.`);
             return { streams: [] };
         }
 
-        let streams = [];
-        if (isSeries) {
+        let results = [];
+        if (isActuallySeries) {
             const sNum = args.season || 1;
             const eNum = args.episode || 1;
-            console.error(`[RECTV_INFO] Kazınıyor: Sezon ${sNum}, Bölüm ${eNum}`);
-
             const seasonRes = await fetch(`${BASE_URL}/api/season/by/serie/${target.id}/${SW_KEY}/`, { headers: HEADERS });
             const seasons = await seasonRes.json();
 
             for (let s of seasons) {
-                let matchS = parseInt(s.title.match(/\d+/) || 0);
-                if (matchS == sNum) {
+                if (parseInt(s.title.match(/\d+/)) == sNum) {
                     for (let ep of (s.episodes || [])) {
-                        let matchE = parseInt(ep.title.match(/\d+/) || 0);
-                        if (matchE == eNum) {
-                            console.error(`[RECTV_SUCCESS] Kaynaklar Bulundu (Adet: ${ep.sources?.length})`);
+                        if (parseInt(ep.title.match(/\d+/)) == eNum) {
                             (ep.sources || []).forEach(src => {
-                                streams.push({ 
-                                    name: "RECTV", 
-                                    title: `🎬 ${src.quality || 'Auto'} - Bölüm ${eNum}`, 
-                                    url: src.url 
-                                });
+                                results.push({ name: "RECTV", title: `🎬 ${src.quality || 'Auto'}`, url: src.url });
                             });
                         }
                     }
@@ -139,13 +151,14 @@ builder.defineStreamHandler(async (args) => {
             const detRes = await fetch(`${BASE_URL}/api/movie/${target.id}/${SW_KEY}/`, { headers: HEADERS });
             const detData = await detRes.json();
             (detData.sources || []).forEach(src => {
-                streams.push({ name: "RECTV", title: `🎬 ${src.quality || 'HD'}`, url: src.url });
+                results.push({ name: "RECTV", title: `🎬 ${src.quality || 'HD'}`, url: src.url });
             });
         }
 
-        return { streams };
+        console.error(`[BASARI] ${results.length} adet kaynak bulundu.`);
+        return { streams: results };
     } catch (e) {
-        console.error("[RECTV_KRITIK_HATA]:", e.message);
+        console.error("[STREAM_HATASI]:", e.message);
         return { streams: [] };
     }
 });
