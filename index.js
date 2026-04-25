@@ -2,7 +2,7 @@ import pkg from 'stremio-addon-sdk';
 const { addonBuilder, serveHTTP } = pkg;
 import fetch from 'node-fetch';
 
-const VERSION = "5.4.9";
+const VERSION = "5.5.0"; // Versiyon yükseltildi
 const PORT = process.env.PORT || 7010;
 
 const BASE_URL = "https://a.prectv70.lol";
@@ -27,7 +27,7 @@ const manifest = {
     id: "com.nuvio.rectv.v547",
     version: VERSION,
     name: "RECTV Pro v18-Fix",
-    description: "Search IMDb Sync & Sezon Fix",
+    description: "Nuvio Series Detail & IMDb Sync Fix",
     resources: ["catalog", "meta", "stream"],
     types: ["movie", "series"],
     idPrefixes: ["tt"],
@@ -77,24 +77,20 @@ function analyzeStream(url, index, itemLabel) {
 }
 
 // --- CATALOG HANDLER ---
-
 builder.defineCatalogHandler(async (args) => {
     const { type, extra } = args;
     const token = await getAuthToken();
     const authHeaders = Object.assign({}, HEADERS, { 'Authorization': 'Bearer ' + token });
     
-    let rawItems = [];
     try {
         if (extra && extra.search) {
-            // ARAMA BÖLÜMÜ: Burayı tamamen IMDb ID ve TMDB Posterine odaklıyoruz
             const res = await fetch(`${BASE_URL}/api/search/${encodeURIComponent(extra.search)}/${SW_KEY}/`, { headers: authHeaders });
             const data = await res.json();
-            rawItems = type === "series" ? (data.series || []) : (data.posters || []);
+            const rawItems = type === "series" ? (data.series || []) : (data.posters || []);
 
             const metas = await Promise.all(rawItems.slice(0, 10).map(async (item) => {
                 const title = item.title || item.name;
                 const searchType = type === 'series' ? 'tv' : 'movie';
-                
                 const tmdbRes = await fetch(`https://api.themoviedb.org/3/search/${searchType}?api_key=${TMDB_KEY}&query=${encodeURIComponent(title)}&language=tr-TR`);
                 const tmdbData = await tmdbRes.json();
                 
@@ -102,31 +98,28 @@ builder.defineCatalogHandler(async (args) => {
                     const tItem = tmdbData.results[0];
                     const ext = await fetch(`https://api.themoviedb.org/3/${searchType}/${tItem.id}/external_ids?api_key=${TMDB_KEY}`);
                     const extData = await ext.json();
-                    
                     if (extData.imdb_id) {
                         return {
-                            id: extData.imdb_id, // Nuvio için kritik IMDb ID
+                            id: extData.imdb_id,
                             type: type,
-                            name: tItem.name || tItem.title, // TMDB'deki temiz isim
+                            name: tItem.name || tItem.title,
                             poster: tItem.poster_path ? `https://image.tmdb.org/t/p/w500${tItem.poster_path}` : item.image,
-                            description: `Arama Sonucu | ${item.year || ''}`
+                            description: `RecTV | ${item.year || ''}`
                         };
                     }
                 }
                 return null;
             }));
             return { metas: metas.filter(m => m !== null) };
-
         } else {
-            // NORMAL KATALOGLAR: Buraya dokunmuyoruz, RecTV'nin kendi posterlerini kullanmaya devam edebilir
             const apiPath = type === 'series' ? 'serie' : 'movie';
             const genreId = extra?.genre ? (CATEGORY_MAP[extra.genre] || "0") : "0";
             const res = await fetch(`${BASE_URL}/api/${apiPath}/by/filtres/${genreId}/created/0/${SW_KEY}/`, { headers: authHeaders });
             const data = await res.json();
-            rawItems = Array.isArray(data) ? data : (data.posters || []);
+            const rawItems = Array.isArray(data) ? data : (data.posters || []);
 
             const metas = rawItems.slice(0, 20).map(item => ({
-                id: item.id.toString(), // Katalogda kendi ID'sini kullanabilir
+                id: item.id.toString(),
                 type: type,
                 name: item.title || item.name,
                 poster: item.image || item.thumbnail,
@@ -137,9 +130,11 @@ builder.defineCatalogHandler(async (args) => {
     } catch (e) { return { metas: [] }; }
 });
 
-// --- META HANDLER ---
-
+// --- META HANDLER (KRİTİK DÜZELTME) ---
 builder.defineMetaHandler(async ({ id, type }) => {
+    // Eğer ID tt değilse (Normal katalogdan geliyorsa) direkt döner, arama tt ile geliyorsa doldurur
+    if (!id.startsWith("tt")) return { meta: { id, type } };
+
     const cleanId = id.replace("tt", "");
     const searchType = type === "series" ? "tv" : "movie";
 
@@ -153,19 +148,20 @@ builder.defineMetaHandler(async ({ id, type }) => {
             name: tmdbData.name || tmdbData.title,
             poster: `https://image.tmdb.org/t/p/w500${tmdbData.poster_path}`,
             background: `https://image.tmdb.org/t/p/original${tmdbData.backdrop_path}`,
-            description: tmdbData.overview
+            description: tmdbData.overview,
+            videos: [] // Burası boş kalırsa Nuvio filme döner
         };
 
         if (type === "series" && tmdbData.seasons) {
-            meta.videos = [];
             tmdbData.seasons.forEach(s => {
                 if (s.season_number === 0) return;
                 for (let i = 1; i <= s.episode_count; i++) {
                     meta.videos.push({
-                        id: `${id}:${s.season_number}:${i}`,
+                        id: `${id}:${s.season_number}:${i}`, // tt123:1:1 formatı
                         title: `Sezon ${s.season_number}, Bölüm ${i}`,
                         season: s.season_number,
-                        episode: i
+                        episode: i,
+                        released: new Date().toISOString()
                     });
                 }
             });
@@ -175,7 +171,6 @@ builder.defineMetaHandler(async ({ id, type }) => {
 });
 
 // --- STREAM HANDLER ---
-
 builder.defineStreamHandler(async (args) => {
     const cleanId = args.id.split(":")[0].replace("tt", "");
     const isMovie = args.type === 'movie';
@@ -186,6 +181,7 @@ builder.defineStreamHandler(async (args) => {
         const token = await getAuthToken();
         const authHeaders = Object.assign({}, HEADERS, { 'Authorization': 'Bearer ' + token });
 
+        // TMDB'den kesin isim çekiyoruz (Arama hatasını önlemek için)
         const tmdbRes = await fetch(`https://api.themoviedb.org/3/${isMovie ? 'movie' : 'tv'}/${cleanId}?api_key=${TMDB_KEY}&language=tr-TR`);
         const tmdbData = await tmdbRes.json();
         const trTitle = (tmdbData.title || tmdbData.name || "").trim();
@@ -201,9 +197,12 @@ builder.defineStreamHandler(async (args) => {
 
         for (let target of allItems) {
             const targetTitleLower = target.title.toLowerCase().trim();
+            // Kesin eşleşme kontrolü (Mentalist != Mentalist Film gibi)
             if (!targetTitleLower.includes(searchTitleLower) && !searchTitleLower.includes(targetTitleLower)) continue;
 
-            if (target.type === "serie" || (target.label && target.label.toLowerCase().includes("dizi"))) {
+            const isActuallySerie = target.type === "serie" || (target.label && target.label.toLowerCase().includes("dizi"));
+            
+            if (isActuallySerie && !isMovie) {
                 const sRes = await fetch(`${BASE_URL}/api/season/by/serie/${target.id}/${SW_KEY}/`, { headers: authHeaders });
                 const seasons = await sRes.json();
                 for (let s of seasons) {
@@ -223,7 +222,7 @@ builder.defineStreamHandler(async (args) => {
                         }
                     }
                 }
-            } else if (isMovie) {
+            } else if (isMovie && !isActuallySerie) {
                 const detRes = await fetch(`${BASE_URL}/api/movie/${target.id}/${SW_KEY}/`, { headers: authHeaders });
                 const detData = await detRes.json();
                 (detData.sources || []).forEach((src, idx) => {
