@@ -1,14 +1,14 @@
 {
-  "name": "rectv-addon",
-  "version": "5.0.0",
-  "description": "RecTV Express v5 eklentisi",
+  "name": "rectv-pro-v7",
+  "version": "5.2.0",
+  "description": "RecTV Stremio Addon",
   "main": "index.js",
+  "type": "module",
   "scripts": {
     "start": "node index.js"
   },
-  "type": "module",
   "dependencies": {
-    "express": "^4.18.2",
+    "stremio-addon-sdk": "^1.6.10",
     "node-fetch": "^3.3.2",
     "node-cache": "^5.1.2"
   }
