@@ -14,25 +14,27 @@ const FULL_HEADERS = {
 };
 
 const manifest = {
-    id: "com.nuvio.rectv.pro.v340",
-    version: "3.4.0",
+    id: "com.nuvio.rectv.searchfix.v350",
+    version: "3.5.0",
     name: "RECTV Pro",
-    description: "Film ve Dizi Katalogları Ayrıştırıldı",
+    description: "Arama: Ayrı Film ve Dizi Katalogları",
     resources: ["catalog", "meta", "stream"],
-    types: ["movie", "series", "tv"], // Her iki tipi de buraya ekledik
+    types: ["movie", "series"],
     idPrefixes: ["tt"],
     catalogs: [
+        // FİLM KATALOĞU
         {
-            id: "rectv_movie",
+            id: "rectv_movies_search",
             type: "movie",
-            name: "RECTV Filmler",
-            extra: [{ name: "search", isRequired: false }, { name: "skip" }]
+            name: "🎬 RECTV FİLMLER",
+            extra: [{ name: "search", isRequired: false }]
         },
+        // DİZİ KATALOĞU
         {
-            id: "rectv_series",
+            id: "rectv_series_search",
             type: "series",
-            name: "RECTV Diziler",
-            extra: [{ name: "search", isRequired: false }, { name: "skip" }]
+            name: "🍿 RECTV DİZİLER",
+            extra: [{ name: "search", isRequired: false }]
         }
     ]
 };
@@ -62,21 +64,20 @@ builder.defineCatalogHandler(async (args) => {
     let rawItems = [];
 
     try {
-        // ARAMA MANTIĞI
         if (extra && extra.search) {
+            // ARAMA DURUMU
             const searchUrl = `${BASE_URL}/api/search/${encodeURIComponent(extra.search)}/${SW_KEY}/`;
             const response = await fetch(searchUrl, { headers: FULL_HEADERS });
             const data = await response.json();
 
-            // Tip bazlı seçim: Stremio'nun her tür için ayrı sorgu atmasını bekliyoruz
-            if (type === 'movie') {
+            // Sadece bu katalog ID'sine uygun veriyi alıyoruz
+            if (id === "rectv_movies_search") {
                 rawItems = data.posters || [];
-            } else if (type === 'series') {
+            } else if (id === "rectv_series_search") {
                 rawItems = data.series || [];
             }
-        } 
-        // ANA SAYFA MANTIĞI
-        else {
+        } else {
+            // ANA SAYFA DURUMU
             const apiPath = type === 'series' ? 'serie' : 'movie';
             const targetUrl = `${BASE_URL}/api/${apiPath}/by/filtres/0/created/0/${SW_KEY}/`;
             const response = await fetch(targetUrl, { headers: FULL_HEADERS });
@@ -88,6 +89,7 @@ builder.defineCatalogHandler(async (args) => {
             const title = item.title || item.name;
             const year = item.year || item.sublabel;
             const imdbId = await findRealImdbId(title, year, type);
+            
             if (!imdbId) return null;
 
             return {
