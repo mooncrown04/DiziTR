@@ -1,26 +1,76 @@
+import pkg from 'stremio-addon-sdk';
+const { addonBuilder, serveHTTP } = pkg;
+import fetch from 'node-fetch';
+
+const PORT = process.env.PORT || 7010;
+const BASE_URL = "https://a.prectv70.lol";
+const SW_KEY = "4F5A9C3D9A86FA54EACEDDD635185/c3c5bd17-e37b-4b94-a944-8a3688a30452";
+const TMDB_KEY = "4ef0d7355d9ffb5151e987764708ce96";
+
+const FULL_HEADERS = {
+    'User-Agent': 'okhttp/4.12.0',
+    'Accept': 'application/json',
+    'hash256': '711bff4afeb47f07ab08a0b07e85d3835e739295e8a6361db77eebd93d96306b'
+};
+
+// İstediğin geniş kategori listesi
+const GENRES = ["Aksiyon", "Macera", "Animasyon", "Biyografi", "Komedi", "Suç", "Belgesel", "Drama", "Aile", "Fantastik", "Geçmiş", "Korku", "Müzik", "Gizem", "Romantik", "Bilim-Kurgu", "Spor", "Gerilim", "Savaş", "Batı"];
+
 const manifest = {
-    id: "com.nuvio.rectv.pro.split.v380",
-    version: "3.8.0",
-    name: "RECTV Pro",
-    description: "Film ve Dizi Katalogları Ayrıştırıldı",
+    id: "com.nuvio.rectv.pro.v400",
+    version: "4.0.0",
+    name: "RECTV Pro Dual",
+    description: "Gelişmiş Dizi & Film Arama ve Kategoriler",
     resources: ["catalog", "meta", "stream"],
     types: ["movie", "series"],
-    idPrefixes: ["m_", "s_"], // Film için m_, Dizi için s_ öneki
+    idPrefixes: ["tt"],
     catalogs: [
         {
-            id: "rectv_movie",
-            type: "movie",
-            name: "🎬 RECTV FİLMLER",
-            extra: [{ name: "search", isRequired: false }]
+            id: "rectv_series_cat",
+            type: "series",
+            name: "🍿 RECTV Diziler",
+            genres: GENRES,
+            extra: [
+                { name: "search", isRequired: false },
+                { name: "genre", options: GENRES, isRequired: false },
+                { name: "skip", isRequired: false }
+            ],
+            extraSupported: ["search", "genre", "skip"]
         },
         {
-            id: "rectv_series",
-            type: "series",
-            name: "🍿 RECTV DİZİLER",
-            extra: [{ name: "search", isRequired: false }]
+            id: "rectv_movie_cat",
+            type: "movie",
+            name: "🎬 RECTV Filmler",
+            genres: GENRES,
+            extra: [
+                { name: "search", isRequired: false },
+                { name: "genre", options: GENRES, isRequired: false },
+                { name: "skip", isRequired: false }
+            ],
+            extraSupported: ["search", "genre", "skip"]
         }
     ]
 };
+
+const builder = new addonBuilder(manifest);
+
+// --- IMDb ID BULUCU ---
+async function findRealImdbId(title, year, type) {
+    try {
+        const searchType = type === 'series' ? 'tv' : 'movie';
+        const cleanYear = year ? year.toString().match(/\d{4}/)?.[0] : "";
+        const url = `https://api.themoviedb.org/3/search/${searchType}?api_key=${TMDB_KEY}&query=${encodeURIComponent(title)}${cleanYear ? `&year=${cleanYear}` : ""}&language=tr-TR`;
+        const res = await fetch(url);
+        const data = await res.json();
+        
+        if (data.results && data.results.length > 0) {
+            const ext = await fetch(`https://api.themoviedb.org/3/${searchType}/${data.results[0].id}/external_ids?api_key=${TMDB_KEY}`);
+            const extData = await ext.json();
+            return extData.imdb_id;
+        }
+    } catch (e) { return null; }
+    return null;
+}
 
 // --- KATALOG HANDLER ---
 builder.defineCatalogHandler(async (args) => {
@@ -29,16 +79,25 @@ builder.defineCatalogHandler(async (args) => {
 
     try {
         if (extra && extra.search) {
+            // ARAMA DURUMU
             const searchUrl = `${BASE_URL}/api/search/${encodeURIComponent(extra.search)}/${SW_KEY}/`;
             const response = await fetch(searchUrl, { headers: FULL_HEADERS });
             const data = await response.json();
-
-            if (type === 'series') {
-                rawItems = data.series || [];
-            } else {
-                rawItems = data.posters || [];
-            }
-        } else {
+            rawItems = (type === "series") ? (data.series || []) : (data.posters || []);
+        } 
+        else if (extra && extra.genre) {
+            // KATEGORİ SEÇİLDİYSE (Genre filtresi)
+            // Not: RecTV API'nizde kategori bazlı endpoint yoksa burası ana sayfayı döner
+            const apiPath = type === 'series' ? 'serie' : 'movie';
+            const targetUrl = `${BASE_URL}/api/${apiPath}/by/filtres/0/created/0/${SW_KEY}/`;
+            const response = await fetch(targetUrl, { headers: FULL_HEADERS });
+            const data = await response.json();
+            const allItems = Array.isArray(data) ? data : (data.posters || []);
+            // Basit bir fuzzy filter: Tür ismini açıklama veya başlıkta ara
+            rawItems = allItems.filter(i => (i.title || i.name || "").includes(extra.genre));
+        }
+        else {
+            // ANA SAYFA
             const apiPath = type === 'series' ? 'serie' : 'movie';
             const targetUrl = `${BASE_URL}/api/${apiPath}/by/filtres/0/created/0/${SW_KEY}/`;
             const response = await fetch(targetUrl, { headers: FULL_HEADERS });
@@ -46,44 +105,58 @@ builder.defineCatalogHandler(async (args) => {
             rawItems = Array.isArray(data) ? data : (data.posters || []);
         }
 
-        const metas = rawItems.slice(0, 20).map(item => {
-            // ÖNEMLİ: ID'nin başına türe göre önek ekliyoruz
-            // Film ise: m_123, Dizi ise: s_123
-            const prefix = type === 'series' ? "s_" : "m_";
-            return {
-                id: `${prefix}${item.id}`, 
-                type: type,
-                name: item.title || item.name,
-                poster: item.image || item.thumbnail,
-                description: `RecTV | ${item.year || item.sublabel || ''}`
-            };
-        });
+        const metas = await Promise.all(rawItems.slice(0, 15).map(async (item) => {
+            const title = item.title || item.name;
+            const year = item.year || item.sublabel;
+            const imdbId = await findRealImdbId(title, year, type);
+            
+            if (!imdbId) return null;
 
-        return { metas };
+            return {
+                id: imdbId,
+                type: type,
+                name: title,
+                poster: item.image || item.thumbnail,
+                description: `RecTV Engine | ${year || ''}`
+            };
+        }));
+
+        return { metas: metas.filter(m => m !== null) };
     } catch (e) {
         return { metas: [] };
     }
 });
 
-// --- STREAM HANDLER ---
-builder.defineStreamHandler(async (args) => {
-    const { id, type } = args;
-    // Öneki temizleyip gerçek ID'yi alıyoruz (s_123 -> 123)
-    const rectvId = id.replace("s_", "").replace("m_", "");
+builder.defineMetaHandler(async ({ id }) => ({ meta: { id } }));
 
+builder.defineStreamHandler(async ({ id, type }) => {
     try {
-        const apiPath = type === 'series' ? 'serie' : 'movie';
-        const res = await fetch(`${BASE_URL}/api/${apiPath}/${rectvId}/${SW_KEY}/`, { headers: FULL_HEADERS });
-        const data = await res.json();
+        const tmdbRes = await fetch(`https://api.themoviedb.org/3/find/${id}?api_key=${TMDB_KEY}&external_source=imdb_id&language=tr-TR`);
+        const tmdbData = await tmdbRes.json();
+        const item = tmdbData.movie_results?.[0] || tmdbData.tv_results?.[0];
+        if (!item) return { streams: [] };
         
-        const streams = (data.sources || []).map(src => ({
-            name: "RECTV",
-            title: `${src.quality || "HD"} - ${src.title || "Kaynak"}`,
-            url: src.url
-        }));
+        const title = item.title || item.name;
+        const sRes = await fetch(`${BASE_URL}/api/search/${encodeURIComponent(title)}/${SW_KEY}/`, { headers: FULL_HEADERS });
+        const sData = await sRes.json();
+        
+        const pool = type === 'series' ? (sData.series || []) : (sData.posters || []);
+        const found = pool.find(p => (p.title || p.name).toLowerCase().includes(title.toLowerCase()));
 
-        return { streams };
-    } catch (e) {
-        return { streams: [] };
-    }
+        if (!found) return { streams: [] };
+
+        const res = await fetch(`${BASE_URL}/api/${type === 'series' ? 'serie' : 'movie'}/${found.id}/${SW_KEY}/`, { headers: FULL_HEADERS });
+        const finalData = await res.json();
+        
+        return { 
+            streams: (finalData.sources || []).map(src => ({
+                name: "RECTV",
+                title: `${src.quality || "HD"} - ${src.title || "Kaynak"}`,
+                url: src.url
+            }))
+        };
+    } catch (e) { return { streams: [] }; }
 });
+
+const addonInterface = builder.getInterface();
+serveHTTP(addonInterface, { port: PORT });
