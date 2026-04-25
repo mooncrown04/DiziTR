@@ -14,25 +14,32 @@ const FULL_HEADERS = {
 };
 
 const manifest = {
-    id: "com.nuvio.rectv.split.v240",
-    version: "240.0.0",
-    name: "RECTV Dual Katalog",
-    description: "Ayrı Film ve Dizi Katalogları - IMDb ttID",
+    id: "com.nuvio.rectv.fixed.v260",
+    version: "260.0.0",
+    name: "RECTV Pro Dual Search",
+    description: "Arama Sonuçları: Ayrı Film ve Dizi Katalogları",
     resources: ["catalog", "meta", "stream"],
     types: ["movie", "series"],
     idPrefixes: ["tt"],
     catalogs: [
-        // ANA SAYFA VE ARAMA İÇİN AYRI SATIRLAR
-        { id: "rectv-movies-recent", type: "movie", name: "🎬 RECTV Son Filmler", extra: [{ name: "search" }] },
-        { id: "rectv-movies-action", type: "movie", name: "🔥 RECTV Aksiyon Filmleri" },
-        { id: "rectv-series-recent", type: "series", name: "🍿 RECTV Son Diziler", extra: [{ name: "search" }] },
-        { id: "rectv-series-popular", type: "series", name: "🌟 RECTV Popüler Diziler" }
+        { 
+            id: "rectv_movie_cat", 
+            type: "movie", 
+            name: "🎬 RECTV Filmler", 
+            extra: [{ name: "search", isRequired: false }] 
+        },
+        { 
+            id: "rectv_series_cat", 
+            type: "series", 
+            name: "🍿 RECTV Diziler", 
+            extra: [{ name: "search", isRequired: false }] 
+        }
     ]
 };
 
 const builder = new addonBuilder(manifest);
 
-// --- YARDIMCI: IMDb ID BULUCU ---
+// --- IMDb ID BULUCU ---
 async function findRealImdbId(title, year, type) {
     try {
         const searchType = type === 'series' ? 'tv' : 'movie';
@@ -49,40 +56,38 @@ async function findRealImdbId(title, year, type) {
     return null;
 }
 
-// --- KATALOG HANDLER (AYRI SATIR MANTIĞI) ---
-builder.defineCatalogHandler(async ({ type, id, extra }) => {
-    let targetUrl;
+// --- KATALOG HANDLER ---
+builder.defineCatalogHandler(async (args) => {
+    const { type, id, extra } = args;
     const isSearch = extra && extra.search;
-
-    if (isSearch) {
-        // Arama yapıldığında sadece ilgili türe ait sonuçları getirecek
-        targetUrl = `${BASE_URL}/api/search/${encodeURIComponent(extra.search)}/${SW_KEY}/`;
-    } else {
-        // Ana sayfa katalogları için Python kodundaki ID'leri kullanıyoruz
-        let catId = "0"; // created/recent
-        if (id === "rectv-movies-action") catId = "1";
-        if (id === "rectv-series-popular") catId = "42"; // Örnek popüler kategori ID'si
-        
-        const path = type === 'series' ? 'serie' : 'movie';
-        targetUrl = `${BASE_URL}/api/${path}/by/filtres/${catId}/created/0/${SW_KEY}/`;
-    }
+    let rawItems = [];
 
     try {
-        const response = await fetch(targetUrl, { headers: FULL_HEADERS });
-        const data = await response.json();
-
-        // Arama ve Katalog verisini türüne göre ayır
-        let rawItems = [];
         if (isSearch) {
-            rawItems = type === 'series' ? (data.series || []) : (data.posters || []);
+            // ARAMA: Tek bir arama yapıyoruz ama sonucu 'type'a göre filtreliyoruz
+            const searchUrl = `${BASE_URL}/api/search/${encodeURIComponent(extra.search)}/${SW_KEY}/`;
+            const response = await fetch(searchUrl, { headers: FULL_HEADERS });
+            const data = await response.json();
+
+            if (type === 'movie') {
+                rawItems = data.posters || [];
+            } else {
+                rawItems = data.series || [];
+            }
         } else {
+            // KATALOG: Ana sayfa için ilgili türün filtre yoluna git
+            const apiPath = type === 'series' ? 'serie' : 'movie';
+            const targetUrl = `${BASE_URL}/api/${apiPath}/by/filtres/0/created/0/${SW_KEY}/`;
+            const response = await fetch(targetUrl, { headers: FULL_HEADERS });
+            const data = await response.json();
             rawItems = Array.isArray(data) ? data : (data.posters || []);
         }
 
-        const metas = await Promise.all(rawItems.slice(0, 20).map(async (item) => {
+        const metas = await Promise.all(rawItems.slice(0, 15).map(async (item) => {
             const title = item.title || item.name;
             const year = item.year || item.sublabel;
             const imdbId = await findRealImdbId(title, year, type);
+            
             if (!imdbId) return null;
 
             return {
@@ -90,12 +95,16 @@ builder.defineCatalogHandler(async ({ type, id, extra }) => {
                 type: type,
                 name: title,
                 poster: item.image || item.thumbnail,
-                description: `Yıl: ${year || 'Bilinmiyor'}`
+                description: `RecTV ${type === 'movie' ? 'Film' : 'Dizi'} | ${year || ''}`
             };
         }));
 
         return { metas: metas.filter(m => m !== null) };
-    } catch (e) { return { metas: [] }; }
+
+    } catch (e) {
+        console.error("Katalog Hatası:", e);
+        return { metas: [] };
+    }
 });
 
 builder.defineMetaHandler(async ({ id }) => ({ meta: { id } }));
@@ -114,6 +123,7 @@ builder.defineStreamHandler(async ({ id, type }) => {
         
         const pool = type === 'series' ? (sData.series || []) : (sData.posters || []);
         const found = pool.find(p => (p.title || p.name).toLowerCase().includes(title.toLowerCase()));
+
         if (!found) return { streams: [] };
 
         const res = await fetch(`${BASE_URL}/api/${type === 'series' ? 'serie' : 'movie'}/${found.id}/${SW_KEY}/`, { headers: FULL_HEADERS });
