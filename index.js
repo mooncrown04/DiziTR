@@ -14,27 +14,33 @@ const FULL_HEADERS = {
 };
 
 const manifest = {
-    id: "com.nuvio.rectv.searchfix.v350",
-    version: "3.5.0",
-    name: "RECTV Pro",
-    description: "Arama: Ayrı Film ve Dizi Katalogları",
+    id: "com.nuvio.rectv.force.v360",
+    version: "3.6.0",
+    name: "RECTV Pro Dual",
+    description: "Arama ve Katalog Ayrıştırıcı",
     resources: ["catalog", "meta", "stream"],
-    types: ["movie", "series"],
+    // Buradaki sıralama önemli, Stremio genelde ilk türe öncelik verir
+    types: ["series", "movie"], 
     idPrefixes: ["tt"],
     catalogs: [
-        // FİLM KATALOĞU
         {
-            id: "rectv_movies_search",
-            type: "movie",
-            name: "🎬 RECTV FİLMLER",
-            extra: [{ name: "search", isRequired: false }]
-        },
-        // DİZİ KATALOĞU
-        {
-            id: "rectv_series_search",
+            id: "rectv_series_all",
             type: "series",
-            name: "🍿 RECTV DİZİLER",
-            extra: [{ name: "search", isRequired: false }]
+            name: "🍿 RECTV Diziler",
+            // Arama tetiklenmesi için isRequired ve genres eklendi (Cinemeta tarzı)
+            extra: [
+                { name: "search", isRequired: false },
+                { name: "genre", options: ["Popüler", "Yeni"], isRequired: false }
+            ]
+        },
+        {
+            id: "rectv_movie_all",
+            type: "movie",
+            name: "🎬 RECTV Filmler",
+            extra: [
+                { name: "search", isRequired: false },
+                { name: "genre", options: ["Popüler", "Yeni"], isRequired: false }
+            ]
         }
     ]
 };
@@ -49,6 +55,7 @@ async function findRealImdbId(title, year, type) {
         const url = `https://api.themoviedb.org/3/search/${searchType}?api_key=${TMDB_KEY}&query=${encodeURIComponent(title)}${cleanYear ? `&year=${cleanYear}` : ""}&language=tr-TR`;
         const res = await fetch(url);
         const data = await res.json();
+        
         if (data.results && data.results.length > 0) {
             const ext = await fetch(`https://api.themoviedb.org/3/${searchType}/${data.results[0].id}/external_ids?api_key=${TMDB_KEY}`);
             const extData = await ext.json();
@@ -64,20 +71,20 @@ builder.defineCatalogHandler(async (args) => {
     let rawItems = [];
 
     try {
+        // ARAMA DURUMU
         if (extra && extra.search) {
-            // ARAMA DURUMU
             const searchUrl = `${BASE_URL}/api/search/${encodeURIComponent(extra.search)}/${SW_KEY}/`;
             const response = await fetch(searchUrl, { headers: FULL_HEADERS });
             const data = await response.json();
 
-            // Sadece bu katalog ID'sine uygun veriyi alıyoruz
-            if (id === "rectv_movies_search") {
-                rawItems = data.posters || [];
-            } else if (id === "rectv_series_search") {
+            if (type === "series") {
                 rawItems = data.series || [];
+            } else {
+                rawItems = data.posters || [];
             }
-        } else {
-            // ANA SAYFA DURUMU
+        } 
+        // KATALOG DURUMU
+        else {
             const apiPath = type === 'series' ? 'serie' : 'movie';
             const targetUrl = `${BASE_URL}/api/${apiPath}/by/filtres/0/created/0/${SW_KEY}/`;
             const response = await fetch(targetUrl, { headers: FULL_HEADERS });
@@ -94,7 +101,7 @@ builder.defineCatalogHandler(async (args) => {
 
             return {
                 id: imdbId,
-                type: type,
+                type: type, // series ise "series", movie ise "movie"
                 name: title,
                 poster: item.image || item.thumbnail,
                 description: `RecTV | ${year || ''}`
