@@ -31,11 +31,11 @@ const TV_CATEGORY_MAP = {
     "Müzik": "5", "Sinema": "6", "Çocuk": "7", "Moda": "8"
 };
 
-const manifest = {
-    id: "com.nuvio.rectv.v451",
-    version: "4.5.1",
+export const manifest = {
+    id: "com.nuvio.rectv.v452",
+    version: "4.5.2",
     name: "RECTV Ultimate Scraper",
-    description: "IMDb Scraper + Live TV + Multi Genres (Full)",
+    description: "IMDb Scraper + Live TV + Multi Genres (ESM Fix)",
     resources: ["catalog", "meta", "stream"],
     types: ["movie", "series", "tv"],
     idPrefixes: ["tt", "ch_"],
@@ -133,10 +133,9 @@ builder.defineCatalogHandler(async (args) => {
     } catch (e) { return { metas: [] }; }
 });
 
-// --- META HANDLER (SCRAPER) ---
+// --- META HANDLER ---
 builder.defineMetaHandler(async ({ id, type }) => {
     if (id.startsWith("ch_")) return { meta: { id, type: "tv", name: "Canlı Kanal" } };
-
     try {
         const tmdbRes = await fetch(`https://api.themoviedb.org/3/find/${id}?api_key=${TMDB_KEY}&external_source=imdb_id&language=tr-TR`);
         const tmdbData = await tmdbRes.json();
@@ -175,11 +174,10 @@ builder.defineMetaHandler(async ({ id, type }) => {
     } catch (e) { return { meta: { id, type } }; }
 });
 
-// --- STREAM HANDLER & getStreams ---
-async function getStreams(args) {
+// --- STREAM HANDLER ---
+export async function getStreams(args) {
     const { id, type } = args;
     try {
-        // 1. CANLI TV
         if (id.startsWith("ch_")) {
             const chId = id.replace("ch_", "");
             const res = await fetch(`${BASE_URL}/api/channel/${chId}/${SW_KEY}/`, { headers: FULL_HEADERS });
@@ -191,7 +189,6 @@ async function getStreams(args) {
             }));
         }
 
-        // 2. FİLM / DİZİ
         const [imdbId, sNum, eNum] = id.split(":");
         const tmdbRes = await fetch(`https://api.themoviedb.org/3/find/${imdbId}?api_key=${TMDB_KEY}&external_source=imdb_id&language=tr-TR`);
         const tmdbData = await tmdbRes.json();
@@ -209,7 +206,7 @@ async function getStreams(args) {
         const res = await fetch(`${BASE_URL}/api/${apiPath}/${found.id}/${SW_KEY}/`, { headers: FULL_HEADERS });
         const finalData = await res.json();
 
-        if (type === "series") {
+        if (type === "series" && sNum && eNum) {
             const season = (finalData.seasons || []).find(s => s.season_number == sNum);
             const episode = (season?.episodes || []).find(e => e.episode_number == eNum);
             return (episode?.sources || []).map(src => ({ name: "RECTV", title: src.title, url: src.url }));
@@ -221,12 +218,6 @@ async function getStreams(args) {
 
 builder.defineStreamHandler(async (args) => ({ streams: await getStreams(args) }));
 
-// --- MODÜL ÇIKIŞLARI (Her iki sistem için) ---
-const addonInterface = builder.getInterface();
+// --- MODÜL ÇIKIŞLARI (ESM YAPISI) ---
+export const addonInterface = builder.getInterface();
 serveHTTP(addonInterface, { port: PORT });
-
-module.exports = { 
-    getStreams,
-    manifest,
-    addonInterface
-};
