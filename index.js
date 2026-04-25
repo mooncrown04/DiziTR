@@ -13,92 +13,105 @@ const FULL_HEADERS = {
 };
 
 const manifest = {
-    id: "org.rectv.pro.final.v50", // Cache kırmak için yükseltildi
-    version: "50.0.0",
-    name: "RECTV Pro Ultra",
-    description: "RecTV Çalışan Search Engine Entegreli",
+    id: "org.rectv.pro.working.v60", 
+    version: "60.0.0",
+    name: "RECTV Katalog",
+    description: "Kataloglar Aktif - RecTV Engine",
     resources: ["catalog", "meta", "stream"],
     types: ["movie", "series"],
-    idPrefixes: ["rectv", "tt"],
+    idPrefixes: ["rectv"],
     catalogs: [
-        { id: "rectv-popular", type: "movie", name: "🔥 Popüler İçerikler" }
+        { 
+            id: "rectv-all", 
+            type: "movie", 
+            name: "🎬 RECTV Tüm Filmler",
+            extra: [{ name: "search" }] 
+        }
     ]
 };
 
 const builder = new addonBuilder(manifest);
 
-// --- TOKEN ALICI ---
 async function getAuthToken() {
     try {
         const res = await fetch(`${BASE_URL}/api/attest/nonce`, { headers: FULL_HEADERS });
-        const token = await res.text();
-        return token.trim();
+        return (await res.text()).trim();
     } catch (e) { return null; }
 }
 
-// --- KATALOG HANDLER (Arama Üzerinden Katalog Oluşturma) ---
-builder.defineCatalogHandler(async () => {
+// --- KATALOG OLUŞTURUCU ---
+builder.defineCatalogHandler(async ({ type, id, extra }) => {
     const token = await getAuthToken();
-    // Filtreleme çalışmadığı için Popüler bir aramayı katalog yapıyoruz
-    const searchUrl = `${BASE_URL}/api/search/2026/${SW_KEY}/`; 
+    
+    // Filtreleme çalışmadığı için "a" harfiyle arama yapıyoruz (Böylece çoğu film listelenir)
+    // Veya direkt popüler bir kelime: "2024", "güncel" vb.
+    const query = extra.search ? extra.search : "recep"; 
+    const searchUrl = `${BASE_URL}/api/search/${encodeURIComponent(query)}/${SW_KEY}/`;
 
     try {
         const response = await fetch(searchUrl, {
             headers: { ...FULL_HEADERS, 'Authorization': `Bearer ${token}` }
         });
         const data = await response.json();
+        
+        // Senin attığın JSON'daki "posters" kısmını alıyoruz
         const items = data.posters || [];
 
         const metas = items.map(item => ({
             id: `rectv:movie:${item.id}`,
             type: "movie",
             name: item.title,
-            poster: item.image,
-            description: item.description || "RECTV"
+            poster: item.image, // JSON'daki görsel linki
+            description: item.description || "RecTV Film"
         }));
 
         return { metas };
-    } catch (e) { return { metas: [] }; }
+    } catch (e) {
+        return { metas: [] };
+    }
 });
 
-// --- META HANDLER ---
+// --- META HANDLER (Tıklanan Filmin Detayı) ---
 builder.defineMetaHandler(async ({ id }) => {
     const realId = id.split(':')[2];
     const token = await getAuthToken();
 
     try {
-        const response = await fetch(`${BASE_URL}/api/movie/${realId}/${SW_KEY}/`, {
+        const res = await fetch(`${BASE_URL}/api/movie/${realId}/${SW_KEY}/`, {
             headers: { ...FULL_HEADERS, 'Authorization': `Bearer ${token}` }
         });
-        const data = await response.json();
+        const item = await res.json();
 
         return {
             meta: {
                 id: id,
                 type: "movie",
-                name: data.title,
-                poster: data.image,
-                background: data.cover,
-                description: data.description
+                name: item.title,
+                poster: item.image,
+                background: item.cover,
+                description: item.description,
+                runtime: item.duration,
+                releaseInfo: item.sublabel
             }
         };
     } catch (e) { return { meta: {} }; }
 });
 
-// --- STREAM HANDLER (Direkt Link Çekici) ---
+// --- STREAM HANDLER (Video Linki) ---
 builder.defineStreamHandler(async ({ id }) => {
     const realId = id.split(':')[2];
     const token = await getAuthToken();
 
     try {
-        const response = await fetch(`${BASE_URL}/api/movie/${realId}/${SW_KEY}/`, {
+        const res = await fetch(`${BASE_URL}/api/movie/${realId}/${SW_KEY}/`, {
             headers: { ...FULL_HEADERS, 'Authorization': `Bearer ${token}` }
         });
-        const data = await response.json();
-        
+        const data = await res.json();
+
+        // JSON'daki "sources" kısmını Stremio formatına çeviriyoruz
         const streams = (data.sources || []).map((src, i) => ({
             name: "RECTV",
-            title: `Kaynak ${i + 1} (${src.quality || 'HD'})`,
+            title: `${src.title || 'Kaynak'} - ${src.quality || 'HD'}`,
             url: src.url
         }));
 
