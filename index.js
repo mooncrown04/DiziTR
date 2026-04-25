@@ -13,48 +13,40 @@ const FULL_HEADERS = {
     'hash256': '711bff4afeb47f07ab08a0b07e85d3835e739295e8a6361db77eebd93d96306b'
 };
 
-// İstediğin geniş kategori listesi
-const GENRES = ["Aksiyon", "Macera", "Animasyon", "Biyografi", "Komedi", "Suç", "Belgesel", "Drama", "Aile", "Fantastik", "Geçmiş", "Korku", "Müzik", "Gizem", "Romantik", "Bilim-Kurgu", "Spor", "Gerilim", "Savaş", "Batı"];
+const GENRES = ["Aksiyon", "Macera", "Animasyon", "Komedi", "Suç", "Belgesel", "Drama", "Korku", "Bilim-Kurgu", "Gerilim"];
 
 const manifest = {
-    id: "com.nuvio.rectv.pro.v400",
-    version: "4.0.0",
+    id: "com.nuvio.rectv.v410",
+    version: "4.1.0",
     name: "RECTV Pro Dual",
-    description: "Gelişmiş Dizi & Film Arama ve Kategoriler",
+    description: "Dizi ve Film Arama Tam Destek",
     resources: ["catalog", "meta", "stream"],
     types: ["movie", "series"],
     idPrefixes: ["tt"],
     catalogs: [
         {
-            id: "rectv_series_cat",
+            id: "rectv_series",
             type: "series",
             name: "🍿 RECTV Diziler",
-            genres: GENRES,
             extra: [
                 { name: "search", isRequired: false },
-                { name: "genre", options: GENRES, isRequired: false },
-                { name: "skip", isRequired: false }
-            ],
-            extraSupported: ["search", "genre", "skip"]
+                { name: "genre", options: GENRES, isRequired: false }
+            ]
         },
         {
-            id: "rectv_movie_cat",
+            id: "rectv_movie",
             type: "movie",
             name: "🎬 RECTV Filmler",
-            genres: GENRES,
             extra: [
                 { name: "search", isRequired: false },
-                { name: "genre", options: GENRES, isRequired: false },
-                { name: "skip", isRequired: false }
-            ],
-            extraSupported: ["search", "genre", "skip"]
+                { name: "genre", options: GENRES, isRequired: false }
+            ]
         }
     ]
 };
 
 const builder = new addonBuilder(manifest);
 
-// --- IMDb ID BULUCU ---
 async function findRealImdbId(title, year, type) {
     try {
         const searchType = type === 'series' ? 'tv' : 'movie';
@@ -62,7 +54,6 @@ async function findRealImdbId(title, year, type) {
         const url = `https://api.themoviedb.org/3/search/${searchType}?api_key=${TMDB_KEY}&query=${encodeURIComponent(title)}${cleanYear ? `&year=${cleanYear}` : ""}&language=tr-TR`;
         const res = await fetch(url);
         const data = await res.json();
-        
         if (data.results && data.results.length > 0) {
             const ext = await fetch(`https://api.themoviedb.org/3/${searchType}/${data.results[0].id}/external_ids?api_key=${TMDB_KEY}`);
             const extData = await ext.json();
@@ -72,44 +63,40 @@ async function findRealImdbId(title, year, type) {
     return null;
 }
 
-// --- KATALOG HANDLER ---
 builder.defineCatalogHandler(async (args) => {
     const { type, extra } = args;
     let rawItems = [];
 
     try {
+        // 1. ARAMA TETİKLENDİYSE
         if (extra && extra.search) {
-            // ARAMA DURUMU
             const searchUrl = `${BASE_URL}/api/search/${encodeURIComponent(extra.search)}/${SW_KEY}/`;
             const response = await fetch(searchUrl, { headers: FULL_HEADERS });
             const data = await response.json();
             rawItems = (type === "series") ? (data.series || []) : (data.posters || []);
         } 
-        else if (extra && extra.genre) {
-            // KATEGORİ SEÇİLDİYSE (Genre filtresi)
-            // Not: RecTV API'nizde kategori bazlı endpoint yoksa burası ana sayfayı döner
-            const apiPath = type === 'series' ? 'serie' : 'movie';
-            const targetUrl = `${BASE_URL}/api/${apiPath}/by/filtres/0/created/0/${SW_KEY}/`;
-            const response = await fetch(targetUrl, { headers: FULL_HEADERS });
-            const data = await response.json();
-            const allItems = Array.isArray(data) ? data : (data.posters || []);
-            // Basit bir fuzzy filter: Tür ismini açıklama veya başlıkta ara
-            rawItems = allItems.filter(i => (i.title || i.name || "").includes(extra.genre));
-        }
+        // 2. KATEGORİ VEYA ANA SAYFA
         else {
-            // ANA SAYFA
             const apiPath = type === 'series' ? 'serie' : 'movie';
             const targetUrl = `${BASE_URL}/api/${apiPath}/by/filtres/0/created/0/${SW_KEY}/`;
             const response = await fetch(targetUrl, { headers: FULL_HEADERS });
             const data = await response.json();
             rawItems = Array.isArray(data) ? data : (data.posters || []);
+            
+            // Eğer kategori (genre) seçilmişse ve API desteklemiyorsa bile listeyi boş döndürme
+            if (extra && extra.genre) {
+                const filtered = rawItems.filter(i => 
+                    (i.title || i.name || "").toLowerCase().includes(extra.genre.toLowerCase())
+                );
+                // Filtreleme sonucu boşsa tüm listeyi göster (Kataloğun çökmesini önler)
+                if (filtered.length > 0) rawItems = filtered;
+            }
         }
 
         const metas = await Promise.all(rawItems.slice(0, 15).map(async (item) => {
             const title = item.title || item.name;
             const year = item.year || item.sublabel;
             const imdbId = await findRealImdbId(title, year, type);
-            
             if (!imdbId) return null;
 
             return {
@@ -117,7 +104,7 @@ builder.defineCatalogHandler(async (args) => {
                 type: type,
                 name: title,
                 poster: item.image || item.thumbnail,
-                description: `RecTV Engine | ${year || ''}`
+                description: `RecTV | ${year || ''}`
             };
         }));
 
