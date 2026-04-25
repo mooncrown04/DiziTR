@@ -19,7 +19,7 @@ const manifest = {
     name: "RECTV Pro",
     description: "Film ve Dizi Katalogları Ayrıştırıldı",
     resources: ["catalog", "meta", "stream"],
-    types: ["movie", "series"], // Her iki tipi de buraya ekledik
+    types: ["movie", "series", "tv"], // Her iki tipi de buraya ekledik
     idPrefixes: ["tt"],
     catalogs: [
         {
