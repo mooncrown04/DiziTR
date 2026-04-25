@@ -2,7 +2,7 @@ import pkg from 'stremio-addon-sdk';
 const { addonBuilder, serveHTTP } = pkg;
 import fetch from 'node-fetch';
 
-const VERSION = "5.4.7";
+const VERSION = "5.4.8"; // Versiyon güncellendi
 const PORT = process.env.PORT || 7010;
 
 const BASE_URL = "https://a.prectv70.lol";
@@ -27,7 +27,7 @@ const manifest = {
     id: "com.nuvio.rectv.v547",
     version: VERSION,
     name: "RECTV Pro v18-Fix",
-    description: "Auth Token & Sezon/Bölüm Senkronizasyonu",
+    description: "ID-Clean & Sezon Senkronizasyonu",
     resources: ["catalog", "meta", "stream"],
     types: ["movie", "series"],
     idPrefixes: ["tt"],
@@ -49,7 +49,7 @@ const manifest = {
 
 const builder = new addonBuilder(manifest);
 
-// --- SCRAPER FONKSİYONLARI ---
+// --- YARDIMCI FONKSİYONLAR ---
 
 async function getAuthToken() {
     if (cachedToken) return cachedToken;
@@ -111,7 +111,7 @@ builder.defineCatalogHandler(async (args) => {
                 const extData = await ext.json();
                 if (extData.imdb_id) {
                     return {
-                        id: extData.imdb_id,
+                        id: extData.imdb_id, // Burası Nuvio'ya 'tt123' formatında gider (Manifest gereği)
                         type: type,
                         name: title,
                         poster: item.image || item.thumbnail,
@@ -125,21 +125,63 @@ builder.defineCatalogHandler(async (args) => {
     } catch (e) { return { metas: [] }; }
 });
 
-builder.defineMetaHandler(async ({ id, type }) => ({ meta: { id, type } }));
+// --- META HANDLER (KRİTİK: SEZON LİSTESİNİ BURADA OLUŞTURUYORUZ) ---
 
-// --- STREAM HANDLER (Kritik v18 Entegrasyonu) ---
+builder.defineMetaHandler(async ({ id, type }) => {
+    // ID'den tt temizleme (Sadece sayısal ID ile TMDB'ye sormak için)
+    const cleanId = id.replace("tt", "");
+    const searchType = type === "series" ? "tv" : "movie";
+
+    let meta = { id, type };
+
+    try {
+        // TMDB'den sezon bilgilerini alıyoruz
+        const tmdbRes = await fetch(`https://api.themoviedb.org/3/${searchType}/${cleanId}?api_key=${TMDB_KEY}&language=tr-TR`);
+        const tmdbData = await tmdbRes.json();
+
+        meta.name = tmdbData.name || tmdbData.title;
+        meta.poster = `https://image.tmdb.org/t/p/w500${tmdbData.poster_path}`;
+
+        if (type === "series" && tmdbData.seasons) {
+            // Nuvio'nun "dizi" olduğunu anlaması için videoları (sezon/bölüm) ekliyoruz
+            meta.videos = [];
+            tmdbData.seasons.forEach(s => {
+                if (s.season_number === 0) return; // Special bölümleri geç
+                for (let i = 1; i <= s.episode_count; i++) {
+                    meta.videos.push({
+                        id: `${id}:${s.season_number}:${i}`,
+                        title: `Sezon ${s.season_number}, Bölüm ${i}`,
+                        season: s.season_number,
+                        episode: i,
+                        released: new Date().toISOString()
+                    });
+                }
+            });
+        }
+        return { meta };
+    } catch (e) {
+        return { meta };
+    }
+});
+
+// --- STREAM HANDLER ---
 
 builder.defineStreamHandler(async (args) => {
-    const cleanId = args.id.split(":")[0];
+    // 1. ADIM: ID'Yİ TEMİZLE (tt var mı yok mu bakma, hepsini temizle)
+    const rawId = args.id.split(":")[0];
+    const cleanId = rawId.replace("tt", ""); 
+    
     const isMovie = args.type === 'movie';
-    const seasonNum = args.season || (args.id.includes(":") ? args.id.split(":")[1] : null);
-    const episodeNum = args.episode || (args.id.includes(":") ? args.id.split(":")[2] : null);
+    const seasonNum = args.season || (args.id.includes(":") ? args.id.split(":")[1] : 1);
+    const episodeNum = args.episode || (args.id.includes(":") ? args.id.split(":")[2] : 1);
+
+    console.error(`[NUVIO_DEBUG] CleanID: ${cleanId} | S: ${seasonNum} | E: ${episodeNum}`);
 
     try {
         const token = await getAuthToken();
         const authHeaders = Object.assign({}, HEADERS, { 'Authorization': 'Bearer ' + token });
 
-        // 1. TMDB Verisi (TR ve Orjinal isimler için)
+        // TMDB Verisi
         const tmdbRes = await fetch(`https://api.themoviedb.org/3/${isMovie ? 'movie' : 'tv'}/${cleanId}?api_key=${TMDB_KEY}&language=tr-TR`);
         const tmdbData = await tmdbRes.json();
         const trTitle = (tmdbData.title || tmdbData.name || "").trim();
@@ -147,7 +189,6 @@ builder.defineStreamHandler(async (args) => {
 
         if (!trTitle) return { streams: [] };
 
-        // 2. Arama ve Eşleşme Filtresi
         let searchQueries = [trTitle];
         if (isMovie && orgTitle && orgTitle !== trTitle) searchQueries.push(orgTitle);
 
@@ -164,7 +205,7 @@ builder.defineStreamHandler(async (args) => {
         for (let target of allItems) {
             const targetTitleLower = target.title.toLowerCase().trim();
             
-            // Kesin Eşleşme (From vb. için)
+            // From gibi kısa isimler için kesin eşleşme
             let isMatch = (searchTitleLower === "from") 
                 ? (targetTitleLower === "from" || targetTitleLower === "from dizi")
                 : (targetTitleLower.includes(searchTitleLower));
@@ -176,7 +217,6 @@ builder.defineStreamHandler(async (args) => {
             if (!isMovie && !isActuallySerie) continue;
 
             if (isActuallySerie) {
-                // DIZI MANTIGI (Sezon/Bölüm parse ederek)
                 const sRes = await fetch(`${BASE_URL}/api/season/by/serie/${target.id}/${SW_KEY}/`, { headers: authHeaders });
                 const seasons = await sRes.json();
                 for (let s of seasons) {
@@ -199,7 +239,6 @@ builder.defineStreamHandler(async (args) => {
                     }
                 }
             } else {
-                // FILM MANTIGI
                 let movieSources = target.sources || [];
                 if (movieSources.length === 0) {
                     const detRes = await fetch(`${BASE_URL}/api/movie/${target.id}/${SW_KEY}/`, { headers: authHeaders });
