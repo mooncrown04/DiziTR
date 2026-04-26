@@ -19,7 +19,7 @@ const TV_MAP = { "Spor": "1", "Belgesel": "2", "Ulusal": "3", "Haber": "4", "Sin
 
 export const manifest = {
     id: "com.nuvio.rectv.v470",
-    version: "4.7.1",
+    version: "4.7.0",
     name: "RECTV Ultimate Pro",
     description: "TV: ch_Kanalİsmi | Dizi: Sadece IMDb ID",
     resources: ["catalog", "meta", "stream"],
