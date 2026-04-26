@@ -18,13 +18,13 @@ const SERIES_MAP = { "Aksiyon": "1", "Macera": "2", "Animasyon": "3", "Komedi": 
 const TV_MAP = { "Spor": "1", "Belgesel": "2", "Ulusal": "3", "Haber": "4", "Sinema": "6" };
 
 export const manifest = {
-    id: "com.nuvio.rectv.v481.tv_pro",
+    id: "com.nuvio.rectv.v481.tv_pro_fixed",
     version: "4.8.1",
     name: "RECTV Pro TV",
-    description: "TV Meta Zenginleştirilmiş & tt'siz ID",
+    description: "TV Meta Zenginleştirilmiş & Alt Tire ID Fix",
     resources: ["catalog", "meta", "stream"],
     types: ["movie", "series", "tv"],
-    idPrefixes: ["ch_", "CH_"],
+    idPrefixes: ["CH_", "tt"],
     catalogs: [
         { id: "rc_series", type: "series", name: "🍿 RECTV Diziler", extra: [{ name: "search" }, { name: "genre", options: Object.keys(SERIES_MAP) }] },
         { id: "rc_movie", type: "movie", name: "🎬 RECTV Filmler", extra: [{ name: "search" }, { name: "genre", options: Object.keys(MOVIE_MAP) }] },
@@ -66,14 +66,17 @@ builder.defineCatalogHandler(async (args) => {
             const data = await res.json();
             const channels = extra?.search ? (data.channels || []) : (data || []);
             
-            return { metas: channels.map(ch => ({ 
-                id: `CH_${ch.title || ch.name}`, 
-                type: "tv", 
-                name: ch.title || ch.name, 
-                poster: ch.image,
-                posterShape: "landscape",
-                description: ch.sublabel ? `Kalite: ${ch.sublabel}` : ""
-            })) };
+            return { metas: channels.map(ch => {
+                const cleanName = (ch.title || ch.name);
+                return { 
+                    id: `CH_${cleanName.replace(/\s+/g, '_')}`, // Boşluklar alt tire yapıldı
+                    type: "tv", 
+                    name: cleanName, 
+                    poster: ch.image,
+                    posterShape: "landscape",
+                    description: ch.sublabel ? `Kalite: ${ch.sublabel}` : ""
+                };
+            }) };
         }
 
         if (id === "rc_series") {
@@ -103,20 +106,20 @@ builder.defineCatalogHandler(async (args) => {
     } catch (e) { return { metas: [] }; }
 });
 
-// --- META HANDLER (TV DETAYLARI ZENGİNLEŞTİRİLDİ) ---
+// --- META HANDLER ---
 builder.defineMetaHandler(async ({ id, type }) => {
     if (id.startsWith("CH_")) {
-        const channelName = id.replace("CH_", "");
+        const channelSearchName = id.replace("CH_", "").replace(/_/g, ' '); // Aramak için alt tireleri tekrar boşluk yaptık
         try {
-            const res = await fetch(`${BASE_URL}/api/search/${encodeURIComponent(channelName)}/${SW_KEY}/`, { headers: FULL_HEADERS });
+            const res = await fetch(`${BASE_URL}/api/search/${encodeURIComponent(channelSearchName)}/${SW_KEY}/`, { headers: FULL_HEADERS });
             const data = await res.json();
-            const ch = (data.channels || []).find(c => (c.title || c.name) === channelName);
+            const ch = (data.channels || []).find(c => (c.title || c.name).replace(/\s+/g, '_') === id.replace("CH_", ""));
 
             if (ch) {
                 return { meta: {
                     id: id,
                     type: "tv",
-                    name: ch.title || ch.name, // Detay sayfasında temiz isim gözükür
+                    name: ch.title || ch.name,
                     poster: ch.image,
                     background: ch.image,
                     logo: ch.image,
@@ -126,7 +129,7 @@ builder.defineMetaHandler(async ({ id, type }) => {
                 }};
             }
         } catch (e) {}
-        return { meta: { id, type: "tv", name: channelName, posterShape: "landscape" } };
+        return { meta: { id, type: "tv", name: channelSearchName, posterShape: "landscape" } };
     }
 
     try {
@@ -168,11 +171,14 @@ builder.defineMetaHandler(async ({ id, type }) => {
 builder.defineStreamHandler(async (args) => {
     const { id, type } = args;
     try {
-        if (id.startsWith("ch_")) {
-            const channelName = id.replace("ch_", "");
-            const sRes = await fetch(`${BASE_URL}/api/search/${encodeURIComponent(channelName)}/${SW_KEY}/`, { headers: FULL_HEADERS });
+        if (id.startsWith("CH_")) {
+            const channelSearchName = id.replace("CH_", "").replace(/_/g, ' '); // Boşluklu haliyle arıyoruz
+            const sRes = await fetch(`${BASE_URL}/api/search/${encodeURIComponent(channelSearchName)}/${SW_KEY}/`, { headers: FULL_HEADERS });
             const sData = await sRes.json();
-            const found = (sData.channels || []).find(c => (c.title || c.name) === channelName);
+            
+            // ID eşleşmesi için tekrar alt tireli kontrol yapıyoruz
+            const found = (sData.channels || []).find(c => (c.title || c.name).replace(/\s+/g, '_') === id.replace("CH_", ""));
+            
             if (found) {
                 const res = await fetch(`${BASE_URL}/api/channel/${found.id}/${SW_KEY}/`, { headers: FULL_HEADERS });
                 const data = await res.json();
