@@ -5,7 +5,6 @@ import fetch from 'node-fetch';
 const PORT = process.env.PORT || 7010;
 const BASE_URL = "https://a.prectv70.lol";
 const SW_KEY = "4F5A9C3D9A86FA54EACEDDD635185/c3c5bd17-e37b-4b94-a944-8a3688a30452";
-const TMDB_KEY = "4ef0d7355d9ffb5151e987764708ce96";
 
 const FULL_HEADERS = {
     'User-Agent': 'okhttp/4.12.0',
@@ -18,10 +17,10 @@ const SERIES_MAP = { "Aksiyon": "1", "Macera": "2", "Animasyon": "3", "Komedi": 
 const TV_MAP = { "Spor": "1", "Belgesel": "2", "Ulusal": "3", "Haber": "4", "Sinema": "6" };
 
 export const manifest = {
-    id: "com.nuvio.rectv.v471",
-    version: "4.7.1",
+    id: "com.nuvio.rectv.v480",
+    version: "4.8.0",
     name: "RECTV Pro",
-    description: "Dizi: Sadece IMDb ID | TV: Kanal İsmi",
+    description: "Scraper Kaldırıldı | TV ch_İsim Yapısı",
     resources: ["catalog", "meta", "stream"],
     types: ["movie", "series", "tv"],
     idPrefixes: ["tt", "ch_"],
@@ -34,28 +33,13 @@ export const manifest = {
 
 const builder = new addonBuilder(manifest);
 
-// --- TEKİL IMDb BULUCU ---
-async function findRealImdbId(title, year, type) {
-    try {
-        const searchType = type === 'series' ? 'tv' : 'movie';
-        const url = `https://api.themoviedb.org/3/search/${searchType}?api_key=${TMDB_KEY}&query=${encodeURIComponent(title)}&language=tr-TR`;
-        const res = await fetch(url);
-        const data = await res.json();
-        if (data.results?.[0]) {
-            const ext = await fetch(`https://api.themoviedb.org/3/${searchType}/${data.results[0].id}/external_ids?api_key=${TMDB_KEY}`);
-            const extData = await ext.json();
-            return extData.imdb_id;
-        }
-    } catch (e) { return null; }
-    return null;
-}
-
-// --- KATALOG ---
+// --- KATALOG HANDLER ---
 builder.defineCatalogHandler(async (args) => {
     const { type, extra } = args;
     let rawItems = [];
 
     try {
+        // 1. CANLI TV (İstediğin ch_ATV formatı)
         if (type === "tv") {
             const genreId = (extra?.genre) ? (TV_MAP[extra.genre] || "3") : "3";
             const res = await fetch(`${BASE_URL}/api/channel/by/filtres/${genreId}/0/0/${SW_KEY}/`, { headers: FULL_HEADERS });
@@ -65,11 +49,13 @@ builder.defineCatalogHandler(async (args) => {
                     id: `ch_${ch.title || ch.name}`, 
                     type: "tv", 
                     name: ch.title || ch.name, 
-                    poster: ch.image 
+                    poster: ch.image,
+                    description: `${ch.category_name || 'Canlı TV'}`
                 })) 
             };
         }
 
+        // 2. ARAMA & KATEGORİ (Scraper olmadan doğrudan RecTV verisi)
         if (extra?.search) {
             const res = await fetch(`${BASE_URL}/api/search/${encodeURIComponent(extra.search)}/${SW_KEY}/`);
             const data = await res.json();
@@ -82,29 +68,33 @@ builder.defineCatalogHandler(async (args) => {
             rawItems = Array.isArray(data) ? data : (data.posters || []);
         }
 
-        const metas = await Promise.all(rawItems.slice(0, 15).map(async (item) => {
-            const imdbId = await findRealImdbId(item.title || item.name, item.year, type);
-            if (!imdbId) return null;
-            return { id: imdbId, type, name: item.title || item.name, poster: item.image || item.thumbnail };
-        }));
-        return { metas: metas.filter(m => m !== null) };
+        return {
+            metas: rawItems.slice(0, 20).map(item => ({
+                id: item.id.toString(), // RecTV ID'sini doğrudan kullanıyoruz
+                type: type,
+                name: item.title || item.name,
+                poster: item.image || item.thumbnail,
+                description: `RecTV | ${item.year || item.sublabel || ''}`
+            }))
+        };
     } catch (e) { return { metas: [] }; }
 });
 
-// --- META ---
+// --- META HANDLER ---
 builder.defineMetaHandler(async ({ id, type }) => {
     return { meta: { id, type, name: id.startsWith("ch_") ? id.replace("ch_", "") : "İçerik" } };
 });
 
-// --- STREAM ---
+// --- STREAM HANDLER ---
 export async function getStreams(args) {
     const { id, type } = args;
     try {
+        // CANLI TV
         if (id.startsWith("ch_")) {
             const channelName = id.replace("ch_", "");
             const sRes = await fetch(`${BASE_URL}/api/search/${encodeURIComponent(channelName)}/${SW_KEY}/`, { headers: FULL_HEADERS });
             const sData = await sRes.json();
-            const found = (sData.channels || []).find(c => (c.title || c.name) === channelName);
+            const found = (sData.channels || []).find(c => (c.title || c.name).toLowerCase() === channelName.toLowerCase());
             if (found) {
                 const res = await fetch(`${BASE_URL}/api/channel/${found.id}/${SW_KEY}/`, { headers: FULL_HEADERS });
                 const data = await res.json();
@@ -113,21 +103,12 @@ export async function getStreams(args) {
             return [];
         }
 
-        const [imdbId] = id.split(":");
-        const tmdbRes = await fetch(`https://api.themoviedb.org/3/find/${imdbId}?api_key=${TMDB_KEY}&external_source=imdb_id&language=tr-TR`);
-        const tmdbData = await tmdbRes.json();
-        const obj = tmdbData.movie_results?.[0] || tmdbData.tv_results?.[0];
-        if (!obj) return [];
-
-        const sRes = await fetch(`${BASE_URL}/api/search/${encodeURIComponent(obj.title || obj.name)}/${SW_KEY}/`, { headers: FULL_HEADERS });
-        const sData = await sRes.json();
-        const pool = (type === 'series') ? (sData.series || []) : (sData.posters || []);
-        const found = pool.find(p => (p.title || p.name).toLowerCase().includes((obj.title || obj.name).toLowerCase()));
-        if (!found) return [];
-
-        const res = await fetch(`${BASE_URL}/api/${type === 'series' ? 'serie' : 'movie'}/${found.id}/${SW_KEY}/`, { headers: FULL_HEADERS });
+        // FİLM & DİZİ (Doğrudan RecTV ID ile çekilir)
+        const apiPath = type === 'series' ? 'serie' : 'movie';
+        const res = await fetch(`${BASE_URL}/api/${apiPath}/${id}/${SW_KEY}/`, { headers: FULL_HEADERS });
         const data = await res.json();
         return (data.sources || []).map(src => ({ name: "RECTV", title: src.title, url: src.url }));
+
     } catch (e) { return []; }
 }
 
