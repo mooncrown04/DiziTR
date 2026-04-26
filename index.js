@@ -18,10 +18,10 @@ const SERIES_MAP = { "Aksiyon": "1", "Macera": "2", "Animasyon": "3", "Komedi": 
 const TV_MAP = { "Spor": "1", "Belgesel": "2", "Ulusal": "3", "Haber": "4", "Sinema": "6" };
 
 export const manifest = {
-    id: "com.nuvio.rectv.v481.meta_tv",
+    id: "com.nuvio.rectv.v481.tv_pro",
     version: "4.8.1",
-    name: "RECTV Pro Meta",
-    description: "TV Meta & tt'siz ID Düzeltmesi",
+    name: "RECTV Pro TV",
+    description: "TV Meta Zenginleştirilmiş & tt'siz ID",
     resources: ["catalog", "meta", "stream"],
     types: ["movie", "series", "tv"],
     idPrefixes: ["ch_", ""],
@@ -57,18 +57,22 @@ builder.defineCatalogHandler(async (args) => {
 
     try {
         if (id === "rc_live") {
+            const gid = (extra?.genre) ? (TV_MAP[extra.genre] || "3") : "3";
             let tvUrl = extra?.search 
                 ? `${BASE_URL}/api/search/${encodeURIComponent(extra.search)}/${SW_KEY}/`
-                : `${BASE_URL}/api/channel/by/filtres/3/0/0/${SW_KEY}/`;
+                : `${BASE_URL}/api/channel/by/filtres/${gid}/0/0/${SW_KEY}/`;
+            
             const res = await fetch(tvUrl, { headers: FULL_HEADERS });
             const data = await res.json();
             const channels = extra?.search ? (data.channels || []) : (data || []);
+            
             return { metas: channels.map(ch => ({ 
-                id: `ch_${ch.id || ch.title || ch.name}`, // ID üzerinden detay çekmek için kanal ID'sini saklıyoruz
+                id: `ch_${ch.title || ch.name}`, 
                 type: "tv", 
                 name: ch.title || ch.name, 
                 poster: ch.image,
-                posterShape: "landscape"
+                posterShape: "landscape",
+                description: ch.sublabel ? `Kalite: ${ch.sublabel}` : ""
             })) };
         }
 
@@ -99,41 +103,32 @@ builder.defineCatalogHandler(async (args) => {
     } catch (e) { return { metas: [] }; }
 });
 
-// --- META HANDLER (TV DETAYLARI EKLENDİ) ---
+// --- META HANDLER (TV DETAYLARI ZENGİNLEŞTİRİLDİ) ---
 builder.defineMetaHandler(async ({ id, type }) => {
-    // 1. CANLI TV İÇİN META DETAYLARI
     if (id.startsWith("ch_")) {
+        const channelName = id.replace("ch_", "");
         try {
-            const cleanId = id.replace("ch_", "");
-            // Eğer cleanId sayı ise kanal ID'si üzerinden, değilse isim üzerinden ara
-            const searchUrl = isNaN(cleanId) 
-                ? `${BASE_URL}/api/search/${encodeURIComponent(cleanId)}/${SW_KEY}/`
-                : `${BASE_URL}/api/channel/${cleanId}/${SW_KEY}/`;
-            
-            const res = await fetch(searchUrl, { headers: FULL_HEADERS });
+            const res = await fetch(`${BASE_URL}/api/search/${encodeURIComponent(channelName)}/${SW_KEY}/`, { headers: FULL_HEADERS });
             const data = await res.json();
-            
-            // Arama sonucundan doğru kanalı bul
-            const channel = isNaN(cleanId) ? (data.channels || []).find(c => c.title === cleanId || c.name === cleanId) : data;
+            const ch = (data.channels || []).find(c => (c.title || c.name) === channelName);
 
-            if (channel) {
+            if (ch) {
                 return { meta: {
                     id: id,
                     type: "tv",
-                    name: channel.title || channel.name,
-                    poster: channel.image,
-                    background: channel.image,
-                    logo: channel.image,
-                    description: channel.description || `${channel.title} Canlı Yayın kanalı.`,
+                    name: ch.title || ch.name, // Detay sayfasında temiz isim gözükür
+                    poster: ch.image,
+                    background: ch.image,
+                    logo: ch.image,
+                    description: `📺 Kategori: ${ch.label || "Canlı TV"}\n⭐ Puan: ${ch.rating || "N/A"}\n👁️ İzlenme: ${ch.views || "0"}\n📌 Sınıf: ${ch.classification || "Genel İzleyici"}`,
                     posterShape: "landscape",
-                    runtime: "CANLI"
+                    runtime: ch.sublabel || "LIVE"
                 }};
             }
-        } catch (e) { console.error("TV Meta Error", e); }
-        return { meta: { id, type: "tv", name: id.replace("ch_", ""), posterShape: "landscape" } };
+        } catch (e) {}
+        return { meta: { id, type: "tv", name: channelName, posterShape: "landscape" } };
     }
 
-    // 2. FİLM VE DİZİ META
     try {
         const pureId = id.split(':')[0];
         const imdbId = `tt${pureId}`;
@@ -174,19 +169,15 @@ builder.defineStreamHandler(async (args) => {
     const { id, type } = args;
     try {
         if (id.startsWith("ch_")) {
-            const cleanId = id.replace("ch_", "");
-            // Kanal ID'si sayı ise direkt çek, değilse isimle ara
-            let channelId = cleanId;
-            if (isNaN(cleanId)) {
-                const sRes = await fetch(`${BASE_URL}/api/search/${encodeURIComponent(cleanId)}/${SW_KEY}/`, { headers: FULL_HEADERS });
-                const sData = await sRes.json();
-                const found = (sRes.channels || []).find(c => (c.title || c.name) === cleanId);
-                if (found) channelId = found.id;
+            const channelName = id.replace("ch_", "");
+            const sRes = await fetch(`${BASE_URL}/api/search/${encodeURIComponent(channelName)}/${SW_KEY}/`, { headers: FULL_HEADERS });
+            const sData = await sRes.json();
+            const found = (sData.channels || []).find(c => (c.title || c.name) === channelName);
+            if (found) {
+                const res = await fetch(`${BASE_URL}/api/channel/${found.id}/${SW_KEY}/`, { headers: FULL_HEADERS });
+                const data = await res.json();
+                return { streams: (data.sources || []).map(src => ({ name: "RECTV", title: src.title || src.size, url: src.url })) };
             }
-            
-            const res = await fetch(`${BASE_URL}/api/channel/${channelId}/${SW_KEY}/`, { headers: FULL_HEADERS });
-            const data = await res.json();
-            return { streams: (data.sources || []).map(src => ({ name: "RECTV", title: src.title, url: src.url })) };
         } else {
             const pureId = id.split(':')[0];
             const season = args.season || id.split(':')[1] || 1;
