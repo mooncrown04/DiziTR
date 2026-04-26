@@ -24,7 +24,7 @@ export const manifest = {
     description: "Zengin Dizi & TV Metası + tt'siz ID",
     resources: ["catalog", "meta", "stream"],
     types: ["movie", "series", "tv"],
-    idPrefixes: ["ch_", ""],
+    idPrefixes: ["CH_", ""],
     catalogs: [
         { id: "rc_series", type: "series", name: "🍿 RECTV Diziler", extra: [{ name: "search" }, { name: "genre", options: Object.keys(SERIES_MAP) }] },
         { id: "rc_movie", type: "movie", name: "🎬 RECTV Filmler", extra: [{ name: "search" }, { name: "genre", options: Object.keys(MOVIE_MAP) }] },
@@ -98,8 +98,8 @@ builder.defineCatalogHandler(async (args) => {
 // --- META HANDLER ---
 builder.defineMetaHandler(async ({ id, type }) => {
     // 1. TV META
-    if (id.startsWith("ch_")) {
-        const channelName = id.replace("ch_", "");
+    if (id.startsWith("CH_")) {
+        const channelName = id.replace("CH_", "");
         try {
             const res = await fetch(`${BASE_URL}/api/search/${encodeURIComponent(channelName)}/${SW_KEY}/`, { headers: FULL_HEADERS });
             const data = await res.json();
@@ -168,8 +168,8 @@ builder.defineMetaHandler(async ({ id, type }) => {
 builder.defineStreamHandler(async (args) => {
     const { id, type } = args;
     try {
-        if (id.startsWith("ch_")) {
-            const channelName = id.replace("ch_", "");
+        if (id.startsWith("CH_")) {
+            const channelName = id.replace("CH_", "");
             const sRes = await fetch(`${BASE_URL}/api/search/${encodeURIComponent(channelName)}/${SW_KEY}/`, { headers: FULL_HEADERS });
             const sData = await sRes.json();
             const found = (sData.channels || []).find(c => (c.title || c.name) === channelName);
