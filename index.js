@@ -34,7 +34,6 @@ export const manifest = {
 
 const builder = new addonBuilder(manifest);
 
-// --- IMDb ID BULUCU ---
 async function findRealImdbId(title, type) {
     try {
         const sType = type === 'series' ? 'tv' : 'movie';
@@ -50,25 +49,26 @@ async function findRealImdbId(title, type) {
     return null;
 }
 
-// --- KATALOG HANDLER (TV GİBİ AYRI KATALOG YÖNLENDİRMELİ) ---
+// --- KATALOG HANDLER (KESİN AYRIM) ---
 builder.defineCatalogHandler(async (args) => {
+    // Burada hem 'type' hem de manifest'te verdiğimiz 'id' kontrol ediliyor
     const { type, id, extra } = args;
     let rawItems = [];
 
     try {
-        // 1. CANLI TV KATALOĞU (rc_live)
-        if (id === "rc_live" || type === "tv") {
+        // 1. CANLI TV AYRIMI (rc_live)
+        if (id === "rc_live") {
             let tvUrl = extra?.search 
                 ? `${BASE_URL}/api/search/${encodeURIComponent(extra.search)}/${SW_KEY}/`
-                : `${BASE_URL}/api/channel/by/filtres/${TV_MAP[extra?.genre] || "3"}/0/0/${SW_KEY}/`;
+                : `${BASE_URL}/api/channel/by/filtres/3/0/0/${SW_KEY}/`;
             const res = await fetch(tvUrl, { headers: FULL_HEADERS });
             const data = await res.json();
             const channels = extra?.search ? (data.channels || []) : (data || []);
             return { metas: channels.map(ch => ({ id: `ch_${ch.title || ch.name}`, type: "tv", name: ch.title || ch.name, poster: ch.image })) };
         }
 
-        // 2. DİZİ KATALOĞU (rc_series)
-        if (id === "rc_series" || type === "series") {
+        // 2. DİZİ AYRIMI (rc_series)
+        if (id === "rc_series") {
             if (extra?.search) {
                 const res = await fetch(`${BASE_URL}/api/search/${encodeURIComponent(extra.search)}/${SW_KEY}/`);
                 const data = await res.json();
@@ -80,8 +80,9 @@ builder.defineCatalogHandler(async (args) => {
                 rawItems = Array.isArray(data) ? data : (data.posters || []);
             }
         } 
-        // 3. FİLM KATALOĞU (rc_movie)
-        else if (id === "rc_movie" || type === "movie") {
+        
+        // 3. FİLM AYRIMI (rc_movie)
+        if (id === "rc_movie") {
             if (extra?.search) {
                 const res = await fetch(`${BASE_URL}/api/search/${encodeURIComponent(extra.search)}/${SW_KEY}/`);
                 const data = await res.json();
@@ -116,7 +117,6 @@ builder.defineMetaHandler(async ({ id, type }) => {
     }
     try {
         const imdbId = id.split(':')[0];
-        const sType = type === 'series' ? 'tv' : 'movie';
         const tmdbRes = await fetch(`https://api.themoviedb.org/3/find/${imdbId}?api_key=${TMDB_KEY}&external_source=imdb_id&language=tr-TR`);
         const tmdbData = await tmdbRes.json();
         const obj = type === 'series' ? tmdbData.tv_results?.[0] : tmdbData.movie_results?.[0];
