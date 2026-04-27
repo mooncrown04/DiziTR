@@ -13,15 +13,8 @@ const FULL_HEADERS = {
     'hash256': '711bff4afeb47f07ab08a0b07e85d3835e739295e8a6361db77eebd93d96306b'
 };
 
-const MOVIE_MAP = {"Aksiyon": "1","Aile": "14","Animasyon": "13","Belgesel": "19","Bilim Kurgu": "4","Bilim-Kurgu": "28","Dram": "2","Fantastik": "10",
-  "Gerilim": "9","Gizem": "15","Komedi": "3","Korku": "8","Macera": "17","Polisiye - Suç": "7","Romantik": "5","Savaş": "32","Seri Filmler": "43","Suç": "22",
-  "Şarj Bitiren İçerikler": "42","Tarih": "21","Tarihi ve Savaş": "12","TV film": "29","Türkçe Altyazı": "27","Türkçe Dublaj": "26","Vahşi Batı": "35","Yerli Dizi / Film": "23"};
- const SERIES_MAP = {"ABC": "59","Aksiyon": "1","Aksiyon & Macera": "31","Adult Swim": "49","Aile": "14","Animasyon": "13","Apple TV+": "51","BBC One": "54",
-  "Belgesel": "19","bilibili": "74","Bilim Kurgu": "4","Bilim-Kurgu": "28","Bilim Kurgu & Fantazi": "30","Cartoon Network": "68","CBS": "52","Cinemax": "56",
-  "Çocuklar": "34","Disney+": "67","Disney Channel": "65","Dram": "2","Fantastik": "10","FOX": "53","Fuji TV": "72","Gerçeklik": "36","Gerilim": "9",
-  "Gizem": "15","Hallmark Channel": "50","HBO": "62","HBO Brasil": "66","Komedi": "3","Korku": "8","Macera": "17","NBC": "55","Netflix": "57",
-  "NHK Educational TV": "60","NIPPON TV": "63","Pembe Dizi": "37","Polisiye - Suç": "7","Romantik": "5","Savaş": "32","Savaş & Politik": "33","Showtime": "58",
-  "Suç": "22","Syfy": "61","Şarj Bitiren İçerikler": "42","Talk": "39","Tarih": "21","Tarihi ve Savaş": "12","TSC": "69","TV Tokyo": "71","Vahşi Batı": "35","Western": "25","Yerli Dizi / Film": "23"};  
+const MOVIE_MAP = {"Aksiyon": "1","Aile": "14","Animasyon": "13","Belgesel": "19","Bilim Kurgu": "4","Bilim-Kurgu": "28","Dram": "2","Fantastik": "10","Gerilim": "9","Gizem": "15","Komedi": "3","Korku": "8","Macera": "17","Polisiye - Suç": "7","Romantik": "5","Savaş": "32","Seri Filmler": "43","Suç": "22","Şarj Bitiren İçerikler": "42","Tarih": "21","Tarihi ve Savaş": "12","TV film": "29","Türkçe Altyazı": "27","Türkçe Dublaj": "26","Vahşi Batı": "35","Yerli Dizi / Film": "23"};
+const SERIES_MAP = {"ABC": "59","Aksiyon": "1","Aksiyon & Macera": "31","Adult Swim": "49","Aile": "14","Animasyon": "13","Apple TV+": "51","BBC One": "54","Belgesel": "19","bilibili": "74","Bilim Kurgu": "4","Bilim-Kurgu": "28","Bilim Kurgu & Fantazi": "30","Cartoon Network": "68","CBS": "52","Cinemax": "56","Çocuklar": "34","Disney+": "67","Disney Channel": "65","Dram": "2","Fantastik": "10","FOX": "53","Fuji TV": "72","Gerçeklik": "36","Gerilim": "9","Gizem": "15","Hallmark Channel": "50","HBO": "62","HBO Brasil": "66","Komedi": "3","Korku": "8","Macera": "17","NBC": "55","Netflix": "57","NHK Educational TV": "60","NIPPON TV": "63","Pembe Dizi": "37","Polisiye - Suç": "7","Romantik": "5","Savaş": "32","Savaş & Politik": "33","Showtime": "58","Suç": "22","Syfy": "61","Şarj Bitiren İçerikler": "42","Talk": "39","Tarih": "21","Tarihi ve Savaş": "12","TSC": "69","TV Tokyo": "71","Vahşi Batı": "35","Western": "25","Yerli Dizi / Film": "23"};  
 const TV_MAP = { "Spor": "1", "Belgesel": "2", "Ulusal": "3", "Haber": "4", "Sinema": "6" };
 const YEARS = Array.from({ length: 30 }, (_, i) => (2026 - i).toString());
 
@@ -29,7 +22,7 @@ export const manifest = {
     id: "com.nuvio.rectv.v481.full_complete",
     version: "4.8.1",
     name: "RECTV Pro Ultimate",
-    description: "TV: Alt Tire ID | Film-Dizi: Yıl Filtresi & Meta",
+    description: "TV: Alt Tire ID | Film-Dizi: tt ID & Yıl Filtresi",
     resources: ["catalog", "meta", "stream"],
     types: ["movie", "series", "tv"],
     idPrefixes: ["CH_", "tt"],
@@ -44,7 +37,7 @@ export const manifest = {
 
 const builder = new addonBuilder(manifest);
 
-// --- IMDb ID BULUCU ---
+// --- IMDb ID BULUCU (Tam tt formatı döndürür) ---
 async function findPureImdbId(title, type) {
     try {
         const sType = type === 'series' ? 'tv' : 'movie';
@@ -54,7 +47,8 @@ async function findPureImdbId(title, type) {
         if (data.results?.[0]) {
             const ext = await fetch(`https://api.themoviedb.org/3/${sType}/${data.results[0].id}/external_ids?api_key=${TMDB_KEY}`);
             const extData = await ext.json();
-            return extData.imdb_id ? extData.imdb_id.replace("tt", "") : null;
+            // Başına tt ekleyerek döndürüyoruz
+            return extData.imdb_id ? extData.imdb_id : null;
         }
     } catch (e) { return null; }
     return null;
@@ -84,7 +78,9 @@ builder.defineCatalogHandler(async (args) => {
         if (extra?.search) {
             fetchUrl = `${BASE_URL}/api/search/${encodeURIComponent(extra.search)}/${SW_KEY}/`;
         } else if (id.includes("_year")) {
-            fetchUrl = `${BASE_URL}/api/${path}/by/filtres/0/created/0/${SW_KEY}/`;
+            // YIL KATALOĞU: Eğer boşsa en güncel yılı (2026) çekerek ayrıştırıyoruz
+            const targetYear = extra?.genre || "2026";
+            fetchUrl = `${BASE_URL}/api/${path}/by/filtres/${targetYear}/created/0/${SW_KEY}/`;
         } else {
             const map = type === 'series' ? SERIES_MAP : MOVIE_MAP;
             const gid = (extra?.genre) ? (map[extra.genre] || "0") : "0";
@@ -95,18 +91,21 @@ builder.defineCatalogHandler(async (args) => {
         const data = await res.json();
         rawItems = extra?.search ? (type === 'series' ? data.series : data.posters) : (Array.isArray(data) ? data : data.posters || []);
 
-        // Yıl Filtreleme (Eğer yıl kataloğundaysak veya yıl seçilmişse)
+        // Manuel Yıl Filtreleme (API 0'dayken tüm yılları döndürürse)
         if (extra?.genre && id.includes("_year")) {
             rawItems = (rawItems || []).filter(item => item.year && item.year.toString() === extra.genre.toString());
         }
 
         const metas = await Promise.all((rawItems || []).slice(0, 50).map(async (item) => {
             const title = item.title || item.name;
-            const pureId = await findPureImdbId(title, type);
-            if (!pureId) return null;
+            const ttId = await findPureImdbId(title, type);
+            if (!ttId) return null;
             return {
-                id: type === 'series' ? `${pureId}:1:1` : pureId,
-                type: type, name: title, poster: item.image || item.thumbnail
+                id: type === 'series' ? `${ttId}:1:1` : ttId,
+                type: type, 
+                name: title, 
+                poster: item.image || item.thumbnail,
+                description: `Yıl: ${item.year || "N/A"}`
             };
         }));
         return { metas: metas.filter(m => m !== null) };
@@ -132,8 +131,9 @@ builder.defineMetaHandler(async ({ id, type }) => {
     }
 
     try {
-        const pureId = id.split(':')[0];
-        const tmdbRes = await fetch(`https://api.themoviedb.org/3/find/tt${pureId}?api_key=${TMDB_KEY}&external_source=imdb_id&language=tr-TR`);
+        // ID zaten tt1234567 formatında geliyor
+        const imdbId = id.split(':')[0];
+        const tmdbRes = await fetch(`https://api.themoviedb.org/3/find/${imdbId}?api_key=${TMDB_KEY}&external_source=imdb_id&language=tr-TR`);
         const tmdbData = await tmdbRes.json();
         const obj = type === 'series' ? tmdbData.tv_results?.[0] : tmdbData.movie_results?.[0];
         if (!obj) return { meta: { id, type, name: "Yükleniyor..." } };
@@ -154,7 +154,7 @@ builder.defineMetaHandler(async ({ id, type }) => {
                 const sData = await sRes.json();
                 (sData.episodes || []).forEach(ep => {
                     meta.videos.push({
-                        id: `${pureId}:${ep.season_number}:${ep.episode_number}`,
+                        id: `${imdbId}:${ep.season_number}:${ep.episode_number}`,
                         title: ep.name || `${ep.episode_number}. Bölüm`,
                         season: ep.season_number, episode: ep.episode_number
                     });
@@ -180,10 +180,10 @@ builder.defineStreamHandler(async (args) => {
                 return { streams: (data.sources || []).map(src => ({ name: "RECTV", title: src.title, url: src.url })) };
             }
         } else {
-            const pureId = id.split(':')[0];
+            const imdbId = id.split(':')[0];
             const season = args.season || id.split(':')[1] || 1;
             const episode = args.episode || id.split(':')[2] || 1;
-            const tmdbRes = await fetch(`https://api.themoviedb.org/3/find/tt${pureId}?api_key=${TMDB_KEY}&external_source=imdb_id&language=tr-TR`);
+            const tmdbRes = await fetch(`https://api.themoviedb.org/3/find/${imdbId}?api_key=${TMDB_KEY}&external_source=imdb_id&language=tr-TR`);
             const tmdbData = await tmdbRes.json();
             const obj = tmdbData.movie_results?.[0] || tmdbData.tv_results?.[0];
             if (obj) {
