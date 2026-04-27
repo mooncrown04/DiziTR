@@ -30,6 +30,7 @@ export const manifest = {
     version: "4.8.1",
     name: "RECTV Pro Ultimate",
     description: "TV: Alt Tire ID | Film-Dizi: Yıl Filtresi & Meta",
+    logo : "https://st5.depositphotos.com/1041725/67731/v/380/depositphotos_677319750-stock-illustration-ararat-mountain-illustration-vector-white.jpg",
     resources: ["catalog", "meta", "stream"],
     types: ["movie", "series", "tv"],
     idPrefixes: ["CH_", "tt"],
